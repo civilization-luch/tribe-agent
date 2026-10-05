@@ -1,0 +1,59 @@
+# tribe-agent config — copy to config.yaml and fill in.
+profile: community
+
+data_dir: ./data
+
+community:
+  api_url: https://api.tribe.partnr.icu/graphql
+  mcp_url: https://mcp.tribe.partnr.icu/mcp
+  bot_token: ""            # paste the community bot token (env: TRIBE_AGENT_BOT_TOKEN)
+  user_id: ""              # bot user id (env: TRIBE_AGENT_USER_ID)
+  communities: []          # empty = every community where the bot is a member
+
+# Fallback working directory when a task has no workspace-bound repository.
+project_path: ""
+
+repo:
+  root: ./data/repos       # where workspace repositories are cloned
+  strategy: shallow        # shallow | full
+  update: lazy             # lazy (fetch before task) | interval
+  git_token: ""            # optional HTTPS token for private repos
+
+concurrency:
+  max_runs: 2              # simultaneous coding-runtime runs
+  max_queue: 200           # backpressure: stop enqueuing above this
+
+opencode:
+  config_dir: ""           # default: packaged opencode templates
+  db: ""                   # default: <data_dir>/opencode/opencode.db
+  url: ""                  # for `opencode serve` (assistant module)
+  password: ""
+  model: ""                # e.g. provider/model
+
+telegram:
+  bot_token: ""
+  admin_chat_id: ""
+
+intervals:
+  notifications: 60
+  announcements: 3600
+  run_agent: 60
+
+batch_limits:
+  notification: 30
+  announcement: 10
+
+# Per-module settings (see profiles/*.yaml for the enabled set).
+module_settings:
+  classify:
+    feedback_workspace_id: ""
+  announcements:
+    frequency: weekly
+    telegram_chat_id: ""
+  executor:
+    commands:
+      lint: ""
+      test: ""
+  assistant:
+    rate_limit: 30
+    timeout: 180

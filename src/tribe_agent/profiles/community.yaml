@@ -1,0 +1,14 @@
+profile: community
+modules:
+  - notifications
+  - announcements
+  - executor
+  - self_heal
+intervals:
+  notifications: 60
+  announcements: 3600
+  run_agent: 60
+batch_limits:
+  notification: 30
+  announcement: 10
+  execute: 5

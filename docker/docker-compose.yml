@@ -1,0 +1,17 @@
+services:
+  tribe-agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    command: ["--config", "/workspace/config.yaml", "run"]
+    volumes:
+      - ./config.yaml:/workspace/config.yaml:ro
+      - ../data:/workspace/data
+      - ./project:/workspace/project
+      - opencode-sessions:/root/.local/share/opencode
+    env_file:
+      - .env
+
+volumes:
+  opencode-sessions:
