@@ -29,7 +29,7 @@ class ExecutorModule(Module):
         settings = config.module_config("executor")
 
         def build_prompt(batch: list[Task]) -> str:
-            lines = ["@task-executor", ""]
+            lines = ["@tribe-task-executor", ""]
             for index, task in enumerate(batch, 1):
                 payload = task.payload
                 lines.append(
@@ -49,7 +49,7 @@ class ExecutorModule(Module):
             "execute": TaskSpec(
                 task_type="execute",
                 batch_limit=limit,
-                agent="task-executor",
+                agent="tribe-task-executor",
                 build_prompt=build_prompt,
             )
         }

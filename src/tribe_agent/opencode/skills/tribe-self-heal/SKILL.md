@@ -1,5 +1,5 @@
 ---
-name: self-heal
+name: tribe-self-heal
 description: Analyzes community metrics and creates issues on anomalies. Use when monitoring community health.
 ---
 

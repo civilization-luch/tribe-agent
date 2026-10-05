@@ -32,7 +32,7 @@ class NotificationsModule(Module):
             "notification": TaskSpec(
                 task_type="notification",
                 batch_limit=limit,
-                agent="notifications",
+                agent="tribe-notifications",
                 build_prompt=self._build_prompt,
                 on_success=self._on_success,
             )
@@ -64,7 +64,7 @@ class NotificationsModule(Module):
         return enqueued
 
     def _build_prompt(self, batch: list[Task]) -> str:
-        lines = ["@notifications", ""]
+        lines = ["@tribe-notifications", ""]
         for index, task in enumerate(batch, 1):
             payload = task.payload
             event = payload.get("event_type", "?")

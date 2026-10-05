@@ -8,6 +8,7 @@ import sqlite3
 from pathlib import Path
 
 from tribe_agent.core.config import AppConfig
+from tribe_agent.core.opencode_config import default_db_path, ensure_runtime_config
 from tribe_agent.core.runtime.base import CodingRuntime, RunResult
 
 DEFAULT_TIMEOUT = 600
@@ -72,6 +73,9 @@ class OpencodeRuntime(CodingRuntime):
             env["OPENCODE_CONFIG_DIR"] = self.config.opencode.config_dir
         if self.config.opencode.db:
             env["OPENCODE_DB"] = self.config.opencode.db
+        runtime_config = ensure_runtime_config(self.config)
+        if runtime_config:
+            env["OPENCODE_CONFIG"] = str(runtime_config)
         if self.config.community.mcp_url:
             env["TRIBE_MCP_URL"] = self.config.community.mcp_url
         if self.config.community.bot_token:
@@ -99,11 +103,8 @@ class OpencodeRuntime(CodingRuntime):
         cmd.append(prompt)
 
         exit_code, stdout, stderr = await _run(cmd, directory, self._env(), self.timeout)
-        session_id = None
-        if self.config.opencode.db:
-            session_id = await asyncio.to_thread(
-                _last_session_id, Path(self.config.opencode.db), directory
-            )
+        db = Path(self.config.opencode.db) if self.config.opencode.db else default_db_path()
+        session_id = await asyncio.to_thread(_last_session_id, db, directory)
         return RunResult(
             exit_code=exit_code,
             stdout=stdout,

@@ -45,11 +45,7 @@ class Runner:
 
     def _prepare_dirs(self) -> None:
         self.config.data_path.mkdir(parents=True, exist_ok=True)
-        if not self.config.opencode.db:
-            db_dir = self.config.data_path / "opencode"
-            db_dir.mkdir(parents=True, exist_ok=True)
-            self.config.opencode.db = str(db_dir / "opencode.db")
-        else:
+        if self.config.opencode.db:
             Path(self.config.opencode.db).expanduser().parent.mkdir(parents=True, exist_ok=True)
 
     def _collect(self) -> tuple[dict[str, TaskSpec], list[Scanner]]:

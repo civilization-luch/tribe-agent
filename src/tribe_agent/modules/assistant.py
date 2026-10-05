@@ -14,7 +14,7 @@ import httpx
 from tribe_agent.core.config import AppConfig
 from tribe_agent.core.module import Module
 
-DEFAULT_AGENT = "assistant"
+DEFAULT_AGENT = "tribe-assistant"
 PRESENCE_HEARTBEAT_SECONDS = 60
 
 

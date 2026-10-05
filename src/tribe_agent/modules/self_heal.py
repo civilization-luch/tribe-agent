@@ -22,7 +22,7 @@ class SelfHealModule(Module):
         threshold = int(config.module_config("self_heal").get("open_issues_threshold", 20))
 
         def build_prompt(batch: list[Task]) -> str:
-            lines = ["@self-healer", ""]
+            lines = ["@tribe-self-healer", ""]
             for index, task in enumerate(batch, 1):
                 payload = task.payload
                 lines.append(
@@ -37,7 +37,7 @@ class SelfHealModule(Module):
             "self_heal": TaskSpec(
                 task_type="self_heal",
                 batch_limit=config.batch_limits.get("self_heal", 10),
-                agent="self-healer",
+                agent="tribe-self-healer",
                 build_prompt=build_prompt,
             )
         }

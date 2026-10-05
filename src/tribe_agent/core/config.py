@@ -56,6 +56,7 @@ class OpencodeConfig(BaseModel):
     url: str = ""
     password: str = ""
     model: str = ""
+    providers: dict[str, Any] = Field(default_factory=dict)
 
 
 class AppConfig(BaseModel):

@@ -2,7 +2,7 @@
 description: Processes pending notifications (mentions, assignments, reviews)
 mode: subagent
 ---
-You are @notifications. You receive a batch of pending notifications.
+You are @tribe-notifications. You receive a batch of pending notifications.
 
 Process each notification according to its type:
 

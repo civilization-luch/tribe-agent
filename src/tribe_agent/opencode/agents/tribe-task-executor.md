@@ -2,7 +2,7 @@
 description: Analyzes the project codebase and implements issues assigned to the agent
 mode: subagent
 ---
-You are @task-executor. You implement issues assigned to you in the project repository.
+You are @tribe-task-executor. You implement issues assigned to you in the project repository.
 
 Follow the project's own conventions:
 1. Read `AGENTS.md` / `README.md` / `CONTRIBUTING.md` at the repository root for conventions, structure and commands.

@@ -31,12 +31,25 @@ def test_community_modules_register_scanners_and_tasks():
         assert module.tasks(config)
 
 
+def test_agent_names_are_namespaced():
+    config = load_config(profile="platform")
+    agents = {}
+    for module in load_modules(config):
+        for spec in module.tasks(config).values():
+            agents[spec.task_type] = spec.agent
+    assert agents["notification"] == "tribe-notifications"
+    assert agents["announcement"] == "tribe-announcements"
+    assert agents["classify"] == "tribe-classifier"
+    assert agents["execute"] == "tribe-task-executor"
+    assert agents["self_heal"] == "tribe-self-healer"
+
+
 def test_notifications_prompt_contains_events():
     module = NotificationsModule()
     prompt = module._build_prompt(
         [_task("notification", {"event_type": "UserMentioned", "title": "Hi", "link": "/x", "body": "yo"})]
     )
-    assert "@notifications" in prompt
+    assert "@tribe-notifications" in prompt
     assert "UserMentioned" in prompt
     assert "Link: /x" in prompt
 
@@ -46,7 +59,7 @@ def test_classify_prompt_contains_issue():
     prompt = module._build_prompt(
         [_task("classify", {"issue_id": "i1", "title": "Bug", "description": "broken", "author_id": "u1"})]
     )
-    assert "@classifier" in prompt
+    assert "@tribe-classifier" in prompt
     assert "issue_id=i1" in prompt
     assert "Bug" in prompt
 
@@ -58,7 +71,7 @@ def test_executor_prompt_contains_issue_and_commands():
     prompt = spec.build_prompt(
         [_task("execute", {"issue_id": "i2", "title": "Fix", "description": "do it"})]
     )
-    assert "@task-executor" in prompt
+    assert "@tribe-task-executor" in prompt
     assert "issue_id=i2" in prompt
     assert "test='pytest'" in prompt
 

@@ -23,7 +23,7 @@ class AnnouncementsModule(Module):
 
         def build_prompt(batch: list[Task]) -> str:
             lines = [
-                "@announcements",
+                "@tribe-announcements",
                 "",
                 "ANNOUNCEMENT CONFIG:",
                 f"- Frequency: {settings.get('frequency', 'weekly')}",
@@ -42,7 +42,7 @@ class AnnouncementsModule(Module):
             "announcement": TaskSpec(
                 task_type="announcement",
                 batch_limit=limit,
-                agent="announcements",
+                agent="tribe-announcements",
                 build_prompt=build_prompt,
             )
         }

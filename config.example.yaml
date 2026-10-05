@@ -25,10 +25,21 @@ concurrency:
 
 opencode:
   config_dir: ""           # default: packaged opencode templates
-  db: ""                   # default: <data_dir>/opencode/opencode.db
+  db: ""                   # default: opencode's own DB (~/.local/share/opencode/opencode.db)
   url: ""                  # for `opencode serve` (assistant module)
   password: ""
   model: ""                # e.g. provider/model
+  # Custom / OpenAI-compatible providers. API keys are read from env via {env:VAR}.
+  providers: {}
+  # providers:
+  #   myrouter:
+  #     npm: "@ai-sdk/openai-compatible"
+  #     name: MyRouter
+  #     options:
+  #       baseURL: https://api.example.com/v1
+  #       apiKey: "{env:MYROUTER_API_KEY}"
+  #     models:
+  #       some/model: { name: some-model }
 
 telegram:
   bot_token: ""

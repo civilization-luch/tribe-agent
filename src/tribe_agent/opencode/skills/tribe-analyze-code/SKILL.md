@@ -1,5 +1,5 @@
 ---
-name: analyze-code
+name: tribe-analyze-code
 description: Reads an assigned issue, analyzes the project repository and produces a solution. Use when implementing issues from the community.
 ---
 

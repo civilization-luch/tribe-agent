@@ -41,6 +41,7 @@ opencode:
   url: ""
   password: ""
   model: ""
+  providers: {}
 
 telegram:
   bot_token: ""
@@ -144,13 +145,15 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def cmd_sessions(args: argparse.Namespace) -> int:
+    from tribe_agent.core.opencode_config import default_db_path
+
     config = _resolve_config(args)
-    db = config.opencode.db
-    if not db or not Path(db).is_file():
-        print("no opencode database found (set opencode.db)")
+    db = Path(config.opencode.db) if config.opencode.db else default_db_path()
+    if not db.is_file():
+        print(f"no opencode database found at {db}")
         return 0
     result = subprocess.run(
-        ["sqlite3", db, "SELECT id, title, time_created FROM session ORDER BY time_created DESC LIMIT 20;"],
+        ["sqlite3", str(db), "SELECT id, title, time_created FROM session ORDER BY time_created DESC LIMIT 20;"],
         capture_output=True,
         text=True,
         check=False,

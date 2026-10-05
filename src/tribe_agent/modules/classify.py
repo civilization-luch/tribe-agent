@@ -28,7 +28,7 @@ class ClassifyModule(Module):
             "classify": TaskSpec(
                 task_type="classify",
                 batch_limit=limit,
-                agent="classifier",
+                agent="tribe-classifier",
                 build_prompt=self._build_prompt,
             )
         }
@@ -63,7 +63,7 @@ class ClassifyModule(Module):
         return enqueued
 
     def _build_prompt(self, batch: list[Task]) -> str:
-        lines = ["@classifier", ""]
+        lines = ["@tribe-classifier", ""]
         for index, task in enumerate(batch, 1):
             payload = task.payload
             description = (payload.get("description", "") or "")[:300]
