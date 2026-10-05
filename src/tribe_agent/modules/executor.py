@@ -16,6 +16,10 @@ query($assigneeId: String!) {
 }
 """
 
+WORKSPACE_REPO = """
+query($id: String!) { workspace(id: $id) { id repoUrl repoBranch } }
+"""
+
 
 class ExecutorModule(Module):
     id = "executor"
@@ -54,7 +58,7 @@ class ExecutorModule(Module):
             )
         }
 
-    def _repo_for(self, ctx: ScanContext, workspace_id: str) -> tuple[str, str]:
+    def _repo_override(self, ctx: ScanContext, workspace_id: str) -> tuple[str, str]:
         repos: dict[str, Any] = ctx.config.module_config("executor").get("repos", {}) or {}
         entry = repos.get(workspace_id)
         if isinstance(entry, dict):
@@ -63,6 +67,23 @@ class ExecutorModule(Module):
             return entry, ""
         return "", ""
 
+    async def _repo_from_graphql(
+        self, ctx: ScanContext, workspace_id: str, cache: dict[str, tuple[str, str]]
+    ) -> tuple[str, str]:
+        if workspace_id in cache:
+            return cache[workspace_id]
+        url, branch = "", ""
+        if workspace_id:
+            try:
+                data = await ctx.client.gql(WORKSPACE_REPO, {"id": workspace_id})
+                workspace = data.get("workspace") or {}
+                url = workspace.get("repoUrl") or ""
+                branch = workspace.get("repoBranch") or ""
+            except Exception as exc:  # noqa: BLE001
+                ctx.logger.warning("workspace repo lookup failed for %s: %s", workspace_id, exc)
+        cache[workspace_id] = (url, branch)
+        return url, branch
+
     async def _scan(self, ctx: ScanContext) -> int:
         user_id = ctx.config.community.user_id
         if not user_id:
@@ -70,12 +91,15 @@ class ExecutorModule(Module):
         data = await ctx.client.gql(LIST_ASSIGNED, {"assigneeId": user_id})
         issues = data.get("issues", []) or []
         enqueued = 0
+        cache: dict[str, tuple[str, str]] = {}
         for issue in issues:
             issue_id = issue.get("id", "")
             if not issue_id:
                 continue
             workspace_id = issue.get("workspaceId", "")
-            url, branch = self._repo_for(ctx, workspace_id)
+            url, branch = self._repo_override(ctx, workspace_id)
+            if not url:
+                url, branch = await self._repo_from_graphql(ctx, workspace_id, cache)
             repo_path = ""
             if url:
                 try:

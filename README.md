@@ -24,6 +24,24 @@ cd docker
 docker compose up -d
 ```
 
+## Onboarding the bot
+
+The agent acts as a community **bot member**. Onboarding is done manually through the
+platform — the agent only needs the bot id and token.
+
+1. **Create the bot** — `My Bots` → "Create bot" (choose a type). Copy the **Bot ID** and the
+   **API key** (token).
+2. **Invite it to the community** — Community → Members → Invite → "By user ID" → paste the
+   **Bot ID**, choose role `member`, send the invitation.
+3. **Accept the invitation as the bot** — `My Bots` → "Switch to bot" (switches the session to the
+   bot), then accept the pending invitation (`My Invitations` / the invite link). For communities
+   with `access_level: open` the bot can simply join.
+4. **Configure the agent** — put the Bot ID into `community.user_id` and the token into
+   `community.bot_token`.
+
+Membership matters: permissions such as `comment.create`, `issue.update` and `issue.assign`
+require an **active member**, so the agent cannot act in a community the bot has not joined.
+
 ## How it works
 
 ```
