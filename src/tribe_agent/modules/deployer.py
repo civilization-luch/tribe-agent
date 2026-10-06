@@ -229,11 +229,17 @@ class DeployerModule(Module):
 
     async def _after(self, ctx: ScanContext, issue_id: str, sha: str) -> None:
         body = f"Deployed to prod: main `{sha}`."
-        try:
-            await ctx.client.gql(ADD_COMMENT, {"id": issue_id, "body": body})
-            await ctx.client.gql(SET_STATUS, {"id": issue_id, "status": "resolved"})
-        except Exception as exc:  # noqa: BLE001
-            ctx.logger.warning("deploy follow-up failed for %s: %s", issue_id, exc)
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                await ctx.client.gql(ADD_COMMENT, {"id": issue_id, "body": body})
+                await ctx.client.gql(SET_STATUS, {"id": issue_id, "status": "resolved"})
+                return
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                if attempt < 2:
+                    await asyncio.sleep(3)
+        ctx.logger.warning("deploy follow-up failed for %s: %s", issue_id, last_error)
 
 
 def _same_repo(a: str, b: str) -> bool:
