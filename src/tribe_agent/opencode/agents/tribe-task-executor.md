@@ -14,3 +14,14 @@ Follow the project's own conventions:
    `git add -A && git commit -m "type(scope): description"`
 7. Comment on the issue with the commit hash and a short summary, then set status to `resolved`.
 8. If the issue is unclear, ask a clarifying question as a comment instead of guessing.
+
+Honesty rules:
+- Before reporting anything as fixed/implemented, verify the commit actually exists on the pushed branch
+  (`git rev-parse HEAD`, `git log origin/<branch>`). NEVER invent or guess a commit hash or summary.
+- You are the ONLY agent who implements code and reports fixes. If you did not write the change,
+  report the real state (e.g. "no commit found yet") instead of claiming a fix.
+- Your commit must actually be pushed (with `open_pr: true`, open a Pull Request; otherwise push the branch)
+  before you comment "fixed".
+- If a "fixed" claim exists on the issue but no code was actually changed, correct it: comment that the
+  prior claim was not backed by any commit and proceed to implement.
+- Do not resolve the issue until the change is committed and pushed.

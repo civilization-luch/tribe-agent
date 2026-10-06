@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from tribe_agent.core.config import load_config
 from tribe_agent.core.module import ScanContext
@@ -11,6 +12,8 @@ from tribe_agent.modules.classify import ClassifyModule
 from tribe_agent.modules.executor import ExecutorModule
 from tribe_agent.modules.notifications import NotificationsModule
 from tribe_agent.modules.self_heal import SelfHealModule
+
+_PKG = Path(__file__).resolve().parents[1] / "src" / "tribe_agent"
 
 
 def _task(task_type: str, payload: dict, **kwargs) -> Task:
@@ -156,3 +159,34 @@ async def test_self_heal_skips_below_threshold():
     queue = StubScalarQueue()
     assert await module._scan(_scan_ctx(client, queue)) == 0
     assert queue.enqueued == []
+
+
+def _read_packaged(rel: str) -> str:
+    return (_PKG / rel).read_text()
+
+
+def test_classifier_agent_self_assigns_accepted():
+    text = _read_packaged("opencode/agents/tribe-classifier.md")
+    assert "assign_issue" in text
+    assert "whoami" in text
+    assert "MUST assign the issue to yourself" in text
+
+
+def test_classifier_never_reports_fixes():
+    text = _read_packaged("opencode/agents/tribe-classifier.md")
+    assert "NEVER edit code" in text
+    assert "NEVER" in text and "commit" in text.lower()
+
+
+def test_executor_agent_must_not_invent_shas():
+    text = _read_packaged("opencode/agents/tribe-task-executor.md")
+    assert "NEVER invent" in text
+    assert "ONLY agent who implements code and reports fixes" in text
+    assert "no commit found yet" in text
+
+
+def test_classifier_skill_self_assigns_on_accepted():
+    text = _read_packaged("opencode/skills/tribe-classifier/SKILL.md")
+    assert "assign the issue to yourself" in text
+    assert "whoami" in text
+    assert "NEVER reports commits/SHAs" in text
