@@ -90,6 +90,9 @@ class ExecutorModule(Module):
             return 0
         data = await ctx.client.gql(LIST_ASSIGNED, {"assigneeId": user_id})
         issues = data.get("issues", []) or []
+        communities = ctx.config.community.communities
+        if communities:
+            issues = [i for i in issues if (i.get("communityId") or "") in communities]
         enqueued = 0
         cache: dict[str, tuple[str, str]] = {}
         for issue in issues:
