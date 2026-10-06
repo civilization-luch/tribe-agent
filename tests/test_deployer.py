@@ -167,12 +167,21 @@ def _issue(
     return {"id": "i1", "status": status, "labels": labels or [], "comments": comments or []}
 
 
-async def _approved(issue: dict, keywords_override: list[str] | None = None) -> bool:
+async def _approved(
+    issue: dict,
+    keywords_override: list[str] | None = None,
+    approval_mode: str | None = None,
+) -> bool:
     module = DeployerModule()
     config = load_config(profile="community")
     config.community.user_id = "BOT"
+    settings: dict = {}
     if keywords_override:
-        config.module_settings["deployer"] = {"keywords": keywords_override}
+        settings["keywords"] = keywords_override
+    if approval_mode:
+        settings["approval_mode"] = approval_mode
+    if settings:
+        config.module_settings["deployer"] = settings
     client = AsyncMock()
 
     async def gql(query: str, variables: dict):
@@ -205,6 +214,27 @@ async def test_approved_by_human_freeform_variants():
     assert await _approved(_issue(comments=human)) is True
     human = [{"id": "c1", "author": {"id": "HUMAN"}, "body": "покати на прод"}]
     assert await _approved(_issue(comments=human)) is True
+
+
+async def test_approved_freeform_infinitive_forms():
+    human = [{"id": "c1", "author": {"id": "HUMAN"}, "body": "можешь деплоить"}]
+    assert await _approved(_issue(comments=human)) is True
+    human = [{"id": "c1", "author": {"id": "HUMAN"}, "body": "задеплоить бы"}]
+    assert await _approved(_issue(comments=human)) is True
+
+
+async def test_approved_any_comment_mode():
+    human = [{"id": "c1", "author": {"id": "HUMAN"}, "body": "спасибо"}]
+    assert await _approved(_issue(comments=human), approval_mode="any-comment") is True
+    human = [{"id": "c1", "author": {"id": "HUMAN"}, "body": "не надо"}]
+    assert await _approved(_issue(comments=human), approval_mode="any-comment") is False
+    human = [{"id": "c1", "author": {"id": "HUMAN"}, "body": "подожди"}]
+    assert await _approved(_issue(comments=human), approval_mode="any-comment") is False
+
+
+async def test_negation_word_boundary_not_substring():
+    human = [{"id": "c1", "author": {"id": "HUMAN"}, "body": "менеджер просил деплой"}]
+    assert await _approved(_issue(comments=human), approval_mode="any-comment") is True
 
 
 async def test_approved_rejects_negation():
