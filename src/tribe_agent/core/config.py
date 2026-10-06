@@ -128,7 +128,9 @@ def load_config(path: str | Path | None = None, profile: str | None = None) -> A
 
     user_data = dict(user_data)
     user_modules = user_data.pop("modules", None)
-    if isinstance(user_modules, dict):
+    if isinstance(user_modules, list):
+        enabled = list(user_modules)
+    elif isinstance(user_modules, dict):
         settings = _deep_merge(user_data.get("module_settings", {}), user_modules)
         user_data["module_settings"] = settings
 
