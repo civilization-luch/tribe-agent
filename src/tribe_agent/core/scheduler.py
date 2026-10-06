@@ -203,6 +203,23 @@ class Runner:
         prompt = spec.build_prompt(items)
         title = f"{spec.task_type}-{datetime.now(UTC).isoformat()}"
         directory = Path(directory_key).expanduser()
+
+        executor_settings = ctx.config.module_config("executor")
+        push_enabled = bool(executor_settings.get("push"))
+        push_mode = executor_settings.get("push_mode", "direct")
+        branch_prefix = executor_settings.get("branch_prefix", "tribe")
+        push_target = ""
+        if push_enabled and items and items[0].repo_path:
+            payload = items[0].payload
+            base_branch = payload.get("branch", "") or ctx.repo.stored_branch(directory)
+            if push_mode == "branch":
+                workspace_id = payload.get("workspace_id", "")
+                issue_id = payload.get("issue_id", "")
+                push_target = f"{branch_prefix}/{workspace_id[:8]}-i{issue_id[:8]}"
+                await ctx.repo.checkout_branch(directory, push_target, base_branch)
+            else:
+                push_target = base_branch or ctx.repo.head_branch(directory)
+
         async with sem:
             try:
                 result = await runtime.run(
@@ -211,6 +228,12 @@ class Runner:
             except Exception as exc:  # noqa: BLE001
                 result = RunResult(exit_code=1, stderr=str(exc), status="error")
         if result.ok:
+            if push_enabled and push_target:
+                try:
+                    await ctx.repo.push(directory, push_target)
+                    await self._comment_pushed(ctx, items, push_target)
+                except Exception as exc:  # noqa: BLE001
+                    ctx.logger.warning("push failed for %s: %s", directory, exc)
             for task in items:
                 await ctx.queue.complete(task.id, {"session_id": result.session_id})
             if spec.on_success:
@@ -221,3 +244,19 @@ class Runner:
             for task in items:
                 await ctx.queue.fail(task.id, error)
             logger.warning("%s: FAIL %d task(s) (%s)", spec.task_type, len(items), error[:160])
+
+    async def _comment_pushed(self, ctx: ScanContext, items: list[Task], target: str) -> None:
+        if not ctx.config.module_config("executor").get("push_comment", True):
+            return
+        for task in items:
+            issue_id = task.payload.get("issue_id")
+            if not issue_id:
+                continue
+            try:
+                await ctx.client.gql(
+                    "mutation($parentId:String!,$body:String!){"
+                    " createComment(parentId:$parentId, body:$body){ id } }",
+                    {"parentId": issue_id, "body": f"Pushed commit(s) to `{target}`."},
+                )
+            except Exception as exc:  # noqa: BLE001
+                ctx.logger.warning("push comment failed for issue %s: %s", issue_id, exc)

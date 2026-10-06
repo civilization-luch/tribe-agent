@@ -63,6 +63,10 @@ module_settings:
     frequency: weekly
     telegram_chat_id: ""
   executor:
+    push: false            # push executor commits to the workspace repository
+    push_mode: direct      # direct (push to the bound branch) | branch (feature branch)
+    branch_prefix: tribe   # feature-branch prefix for push_mode: branch
+    push_comment: true     # comment on the issue after a successful push
     commands:
       lint: ""
       test: ""

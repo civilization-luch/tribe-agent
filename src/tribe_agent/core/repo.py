@@ -25,6 +25,7 @@ class RepoManager:
         self.root.mkdir(parents=True, exist_ok=True)
         self._locks: dict[str, asyncio.Lock] = {}
         self._last_fetch: dict[str, float] = {}
+        self._branches: dict[str, str] = {}
 
     def _lock(self, key: str) -> asyncio.Lock:
         return self._locks.setdefault(key, asyncio.Lock())
@@ -54,7 +55,35 @@ class RepoManager:
                     await self._fetch(path, branch)
             elif self.config.repo.update == "lazy":
                 await self._fetch(path, branch)
+            if branch:
+                self._branches[str(path)] = branch
         return path
+
+    def stored_branch(self, path: str | Path) -> str:
+        return self._branches.get(str(path), "")
+
+    async def checkout_branch(self, path: Path, name: str, base: str = "") -> None:
+        cmd = ["git", "-C", str(path), "switch", "-c", name]
+        if base:
+            cmd.append(base)
+        await asyncio.to_thread(self._git, cmd, path)
+
+    async def push(self, path: Path, target: str) -> None:
+        await asyncio.to_thread(
+            self._git,
+            ["git", "-C", str(path), "push", "origin", f"HEAD:refs/heads/{target}"],
+            path,
+        )
+
+    def head_branch(self, path: Path) -> str:
+        result = subprocess.run(
+            ["git", "-C", str(path), "symbolic-ref", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        return result.stdout.strip() if result.returncode == 0 else ""
 
     def _should_refetch(self, path: str) -> bool:
         now = time.monotonic()

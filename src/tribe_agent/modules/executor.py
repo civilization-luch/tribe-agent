@@ -118,6 +118,8 @@ class ExecutorModule(Module):
                     "description": issue.get("description", ""),
                     "community_id": issue.get("communityId", ""),
                     "workspace_id": workspace_id,
+                    "branch": branch,
+                    "repo_url": url,
                 },
                 community_id=issue.get("communityId", ""),
                 workspace_id=workspace_id,

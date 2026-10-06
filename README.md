@@ -75,6 +75,31 @@ Credentials are provided via environment (`.env` in `docker/`), never baked into
 
 `docker compose down -v` removes the volumes and therefore wipes credentials and sessions.
 
+## Pushing work
+
+By default the executor commits changes only inside its local clone
+(`data/repos/<workspace>`) and comments on the issue with the commit hash.
+To push the commits to the workspace repository, enable it per config:
+
+```yaml
+module_settings:
+  executor:
+    push: true            # push after a successful opencode run
+    push_mode: direct     # direct | branch
+    branch_prefix: tribe
+    push_comment: true
+```
+
+- `push_mode: direct` pushes to the branch the workspace is bound to
+  (the `metadata.repository.branch`, or the clone's current branch).
+- `push_mode: branch` creates a feature branch
+  (`<branch_prefix>/<workspace>/i<issue>`), runs the work there and pushes it.
+- HTTPS remotes authenticate with `repo.git_token` (already embedded in the
+  clone's `origin`); local/file remotes need nothing; SSH remotes are not
+  supported yet.
+- A failed push does not mark the task as failed — the committed work stays
+  local and a warning is logged.
+
 ## Agent namespacing
 
 Our agents and skills are prefixed with `tribe-` (e.g. `tribe-task-executor`,
