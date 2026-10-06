@@ -63,22 +63,29 @@ class DeployerModule(Module):
     async def _scan(self, ctx: ScanContext) -> int:
         settings = self._settings(ctx)
         target_repo = settings.get("repo", "civilization-luch/tribe")
+        branch_prefix = (ctx.config.module_config("executor") or {}).get("branch_prefix", "tribe")
         deployed = 0
-        for task in await ctx.queue.list_completed("execute"):
+        for task in await ctx.queue.list_tasks("execute", ("completed", "failed")):
             result = task.result or {}
-            if not result.get("pr_number") or result.get("deployed"):
-                continue
-            repo = (result.get("repo") or "").strip()
-            if target_repo and repo and not _same_repo(repo, target_repo):
+            if result.get("deployed"):
                 continue
             issue_id = task.payload.get("issue_id", "")
             if not issue_id:
                 continue
-            merged = await self._pr_merged(ctx, repo or target_repo, result["pr_number"])
+            repo = (result.get("repo") or "").strip() or target_repo
+            if target_repo and repo and not _same_repo(repo, target_repo):
+                continue
+            pr_number = result.get("pr_number") or 0
+            if not pr_number:
+                branch = _branch_name(branch_prefix, task.payload)
+                pr_number = await self._find_pr(ctx, repo, branch)
+            if not pr_number:
+                continue
+            merged = await self._pr_merged(ctx, repo, pr_number)
             approved = await self._approved(ctx, issue_id)
             if not merged:
                 if approved and not result.get("reminded"):
-                    await self._remind(ctx, issue_id, repo or target_repo, result["pr_number"])
+                    await self._remind(ctx, issue_id, repo, pr_number)
                     await ctx.queue.update_result(task.id, reminded=True)
                 continue
             if not approved:
@@ -96,6 +103,30 @@ class DeployerModule(Module):
             )
             deployed += 1
         return deployed
+
+    async def _find_pr(self, ctx: ScanContext, repo: str, branch: str) -> int:
+        if not branch:
+            return 0
+        owner = repo.split("/")[0]
+        token = ctx.config.repo.git_token
+        headers = {"Accept": "application/vnd.github+json"}
+        if token:
+            headers["Authorization"] = f"token {token}"
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                response = await client.get(
+                    f"https://api.github.com/repos/{repo}/pulls",
+                    params={"head": f"{owner}:{branch}", "state": "all"},
+                    headers=headers,
+                )
+            if response.status_code != 200:
+                return 0
+            data = response.json()
+            if isinstance(data, list) and data:
+                return int(data[0].get("number") or 0)
+        except Exception as exc:  # noqa: BLE001
+            ctx.logger.warning("PR lookup failed for %s %s: %s", repo, branch, exc)
+        return 0
 
     async def _pr_merged(self, ctx: ScanContext, repo: str, pr_number: int) -> bool:
         token = ctx.config.repo.git_token
@@ -212,3 +243,11 @@ def _same_repo(a: str, b: str) -> bool:
         return "/".join(parts[-2:])
 
     return normalized(a) == normalized(b)
+
+
+def _branch_name(prefix: str, payload: dict[str, Any]) -> str:
+    workspace_id = payload.get("workspace_id", "") or ""
+    issue_id = payload.get("issue_id", "") or ""
+    if not issue_id:
+        return ""
+    return f"{prefix}/{workspace_id[:8]}-i{issue_id[:8]}"

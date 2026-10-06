@@ -73,3 +73,17 @@ async def test_list_completed_and_update_result(queue: TaskQueue):
     }
 
     assert await queue.list_completed("notification") == []
+
+
+async def test_list_tasks_includes_failed(queue: TaskQueue):
+    ok_id = await queue.enqueue("execute", {"issue_id": "ok"}, dedup_key="ok")
+    fail_id = await queue.enqueue("execute", {"issue_id": "bad"}, dedup_key="bad")
+    batch = await queue.dequeue_batch("execute", 10)
+    by_id = {t.id: t for t in batch}
+    await queue.complete(by_id[ok_id].id, {"pr_number": 1})
+    await queue.fail(by_id[fail_id].id, "boom")
+
+    completed = await queue.list_tasks("execute", ("completed",))
+    assert [t.payload["issue_id"] for t in completed] == ["ok"]
+    both = await queue.list_tasks("execute", ("completed", "failed"))
+    assert sorted(t.payload["issue_id"] for t in both) == ["bad", "ok"]

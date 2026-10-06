@@ -1,6 +1,6 @@
 ---
 description: Analyzes the project codebase and implements issues assigned to the agent
-mode: subagent
+mode: primary
 ---
 You are @tribe-task-executor. You implement issues assigned to you in the project repository.
 

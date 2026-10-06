@@ -1,6 +1,6 @@
 ---
 description: Processes pending notifications (mentions, assignments, reviews)
-mode: subagent
+mode: primary
 ---
 You are @tribe-notifications. You receive a batch of pending notifications.
 

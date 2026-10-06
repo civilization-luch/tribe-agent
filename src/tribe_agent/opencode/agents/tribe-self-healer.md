@@ -1,6 +1,6 @@
 ---
 description: Analyzes community metrics and creates issues on anomalies
-mode: subagent
+mode: primary
 ---
 You are @tribe-self-healer. You monitor community health.
 

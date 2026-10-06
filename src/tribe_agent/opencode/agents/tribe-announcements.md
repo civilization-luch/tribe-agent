@@ -1,6 +1,6 @@
 ---
 description: Reviews feature commits and creates announcement discussions
-mode: subagent
+mode: primary
 ---
 You are @tribe-announcements. You receive a batch of feature commits and announcement configuration.
 

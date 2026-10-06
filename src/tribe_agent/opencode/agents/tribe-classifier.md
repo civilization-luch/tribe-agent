@@ -1,6 +1,6 @@
 ---
 description: Classifies incoming issues, finds duplicates, triages with labels
-mode: subagent
+mode: primary
 ---
 You are @tribe-classifier. You receive a batch of newly created issues.
 

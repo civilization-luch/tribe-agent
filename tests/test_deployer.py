@@ -7,18 +7,18 @@ from tribe_agent.core.config import load_config
 from tribe_agent.core.module import ScanContext
 from tribe_agent.core.queue import Task
 from tribe_agent.core.scheduler import _pr_info
-from tribe_agent.modules.deployer import DeployerModule, _same_repo
+from tribe_agent.modules.deployer import DeployerModule, _branch_name, _same_repo
 
 
-def _task(result: dict | None = None, issue_id: str = "i1") -> Task:
+def _task(result: dict | None = None, issue_id: str = "i1", workspace_id: str = "w1") -> Task:
     return Task(
         id=7,
         task_type="execute",
         status="completed",
         community_id="platform",
-        workspace_id="w1",
+        workspace_id=workspace_id,
         repo_path="",
-        payload={"issue_id": issue_id},
+        payload={"issue_id": issue_id, "workspace_id": workspace_id},
         created_at="",
         result=result or {},
     )
@@ -29,7 +29,7 @@ class StubQueue:
         self.tasks = tasks
         self.updated: list[tuple[int, dict]] = []
 
-    async def list_completed(self, task_type: str) -> list[Task]:
+    async def list_tasks(self, task_type: str, statuses: tuple[str, ...] = ("completed",)) -> list[Task]:
         return [t for t in self.tasks if t.task_type == task_type]
 
     async def update_result(self, task_id: int, **patches: object) -> None:
@@ -61,6 +61,7 @@ def _module() -> DeployerModule:
     module._run_deploy = AsyncMock(return_value=(True, "abc1234"))
     module._after = AsyncMock()
     module._remind = AsyncMock()
+    module._find_pr = AsyncMock(return_value=0)
     return module
 
 
@@ -70,8 +71,28 @@ async def test_scan_deploys_when_merged_and_approved():
     assert await module._scan(_ctx(queue)) == 1
     module._run_deploy.assert_awaited_once()
     module._after.assert_awaited_once()
+    module._find_pr.assert_not_awaited()
     assert queue.updated[0][1]["deployed"] is True
     assert queue.updated[0][1]["deployed_sha"] == "abc1234"
+
+
+async def test_scan_discovers_pr_by_branch_for_failed_task():
+    module = _module()
+    module._find_pr = AsyncMock(return_value=10)
+    queue = StubQueue([_task(result={})])
+    assert await module._scan(_ctx(queue)) == 1
+    module._find_pr.assert_awaited_once()
+    branch = module._find_pr.call_args.args[2]
+    assert branch.startswith("tribe/")
+    module._run_deploy.assert_awaited_once()
+
+
+async def test_scan_skips_when_branch_pr_not_found():
+    module = _module()
+    module._find_pr = AsyncMock(return_value=0)
+    queue = StubQueue([_task(result={})])
+    assert await module._scan(_ctx(queue)) == 0
+    module._run_deploy.assert_not_awaited()
 
 
 async def test_scan_skips_when_pr_not_merged():
@@ -237,6 +258,12 @@ def test_same_repo_normalizes_suffix_and_org():
     assert _same_repo("civilization-luch/tribe", "civilization-luch/tribe.git")
     assert _same_repo("civilization-luch/tribe.git", "civilization-luch/tribe")
     assert not _same_repo("a/repo", "b/repo")
+
+
+def test_branch_name_matches_executor_scheme():
+    payload = {"workspace_id": "01KYRJEZTK5T7AWFJ1FK3ZGWFJ", "issue_id": "01M48NPN7VSJ147GGHRGCGH6H6"}
+    assert _branch_name("tribe", payload) == "tribe/01KYRJEZ-i01M48NPN"
+    assert _branch_name("tribe", {}) == ""
 
 
 def test_pr_info_parses_url():

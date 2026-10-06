@@ -175,14 +175,20 @@ class TaskQueue:
         return int(row[0]) if row else 0
 
     async def list_completed(self, task_type: str) -> list[Task]:
+        return await self.list_tasks(task_type, ("completed",))
+
+    async def list_tasks(
+        self, task_type: str, statuses: tuple[str, ...] = ("completed",)
+    ) -> list[Task]:
+        placeholders = ",".join("?" for _ in statuses)
         cursor = await self.conn.execute(
-            """
+            f"""
             SELECT id, task_type, status, community_id, workspace_id, repo_path,
                    payload, created_at, result, error
-            FROM tasks WHERE status = 'completed' AND task_type = ?
+            FROM tasks WHERE task_type = ? AND status IN ({placeholders})
             ORDER BY id ASC
             """,
-            (task_type,),
+            (task_type, *statuses),
         )
         rows = await cursor.fetchall()
         return [Task(
