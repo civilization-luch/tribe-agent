@@ -212,6 +212,7 @@ class Runner:
         open_pr = bool(executor_settings.get("open_pr"))
         push_target = ""
         base_branch = ""
+        base_sha = ""
         if push_enabled and items and items[0].repo_path:
             payload = items[0].payload
             base_branch = payload.get("branch", "") or ctx.repo.stored_branch(directory)
@@ -222,6 +223,7 @@ class Runner:
                 await ctx.repo.checkout_branch(directory, push_target, base_branch)
             else:
                 push_target = base_branch or ctx.repo.head_branch(directory)
+            base_sha = ctx.repo.head_sha(directory)
             if open_pr and push_mode != "branch":
                 ctx.logger.warning("open_pr requires push_mode: branch, skipping PR")
 
@@ -235,13 +237,17 @@ class Runner:
         if result.ok:
             pr_url = ""
             if push_enabled and push_target:
-                try:
-                    await ctx.repo.push(directory, push_target)
-                    if open_pr and push_mode == "branch":
-                        pr_url = await self._open_pr(ctx, items, push_target, base_branch)
-                    await self._comment_pushed(ctx, items, push_target, pr_url)
-                except Exception as exc:  # noqa: BLE001
-                    ctx.logger.warning("push failed for %s: %s", directory, exc)
+                head_sha = ctx.repo.head_sha(directory)
+                if head_sha and head_sha == base_sha:
+                    ctx.logger.info("no changes in %s, skipping push/PR", directory)
+                else:
+                    try:
+                        await ctx.repo.push(directory, push_target)
+                        if open_pr and push_mode == "branch":
+                            pr_url = await self._open_pr(ctx, items, push_target, base_branch)
+                        await self._comment_pushed(ctx, items, push_target, pr_url)
+                    except Exception as exc:  # noqa: BLE001
+                        ctx.logger.warning("push failed for %s: %s", directory, exc)
             for task in items:
                 await ctx.queue.complete(task.id, {"session_id": result.session_id})
             if spec.on_success:

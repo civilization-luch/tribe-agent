@@ -120,6 +120,9 @@ module_settings:
   supported yet.
 - A failed push does not mark the task as failed — the committed work stays
   local and a warning is logged.
+- When a run produces **no new commits** (e.g. a health/informational issue),
+  the executor skips pushing and opening a PR entirely and logs
+  "no changes, skipping push/PR".
 
 ## Agent namespacing
 

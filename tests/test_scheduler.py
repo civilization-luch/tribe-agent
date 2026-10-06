@@ -66,10 +66,12 @@ class FakeRuntime:
 
 
 class StubRepo:
-    def __init__(self, fail_push: bool = False) -> None:
+    def __init__(self, fail_push: bool = False, no_changes: bool = False) -> None:
         self.checkouts: list[tuple] = []
         self.pushes: list[tuple] = []
         self._fail_push = fail_push
+        self._no_changes = no_changes
+        self._sha_calls = 0
 
     async def checkout_branch(self, path: Path, name: str, base: str = "") -> None:
         self.checkouts.append((str(path), name, base))
@@ -81,6 +83,12 @@ class StubRepo:
 
     def head_branch(self, path: Path) -> str:
         return "main"
+
+    def head_sha(self, path: Path) -> str:
+        self._sha_calls += 1
+        if self._no_changes:
+            return "base"
+        return "base" if self._sha_calls == 1 else "changed"
 
 
 class FakeClient:
@@ -243,6 +251,45 @@ async def test_execute_push_failure_keeps_task_completed():
     item = _item({"issue_id": "i1", "branch": "main"}, repo_path="/tmp/clone")
     queue = await _execute(config, [item], FakeRuntime(), repo, client)
     assert queue.completed and not queue.failed
+
+
+async def test_execute_skips_push_and_pr_when_no_changes(monkeypatch):
+    called = []
+
+    async def fake_open_pr(*args, **kwargs):
+        called.append(args)
+        return ""
+
+    monkeypatch.setattr(scheduler_mod, "open_pull_request", fake_open_pr)
+    config = load_config(profile="community")
+    config.module_settings["executor"] = {
+        "push": True, "push_mode": "branch", "open_pr": True,
+    }
+    config.repo.git_token = "tok"
+    repo = StubRepo(no_changes=True)
+    client = FakeClient()
+    item = _item(
+        {"issue_id": "i1", "workspace_id": "w1", "branch": "main",
+         "repo_url": "https://github.com/o/r", "title": "Fix it"},
+        repo_path="/tmp/clone",
+    )
+    queue = await _execute(config, [item], FakeRuntime(), repo, client)
+    assert repo.pushes == []
+    assert called == []
+    assert client.messages == []
+    assert queue.completed and not queue.failed
+
+
+async def test_execute_skips_push_and_pr_when_no_changes_in_direct_mode():
+    config = load_config(profile="community")
+    config.module_settings["executor"] = {"push": True, "push_mode": "direct"}
+    repo = StubRepo(no_changes=True)
+    client = FakeClient()
+    item = _item({"issue_id": "i1", "workspace_id": "w1", "branch": "main"}, repo_path="/tmp/clone")
+    queue = await _execute(config, [item], FakeRuntime(), repo, client)
+    assert repo.pushes == []
+    assert client.messages == []
+    assert queue.completed
 
 
 async def test_execute_runtime_failure_marks_failed_and_skips_push():

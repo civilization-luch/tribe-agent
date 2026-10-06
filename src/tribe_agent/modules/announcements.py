@@ -85,7 +85,8 @@ class AnnouncementsModule(Module):
         url, branch = "", ""
         try:
             data = await ctx.client.gql(WORKSPACE_REPO, {"id": workspace_id})
-            workspace = data.get("workspace") or {}
+            workspace = data.get("workspace")
+            workspace = workspace if isinstance(workspace, dict) else {}
             url = workspace.get("repoUrl") or ""
             branch = workspace.get("repoBranch") or ""
         except Exception as exc:  # noqa: BLE001

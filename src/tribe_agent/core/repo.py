@@ -85,6 +85,16 @@ class RepoManager:
         )
         return result.stdout.strip() if result.returncode == 0 else ""
 
+    def head_sha(self, path: Path) -> str:
+        result = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        return result.stdout.strip() if result.returncode == 0 else ""
+
     def _should_refetch(self, path: str) -> bool:
         now = time.monotonic()
         interval = self.config.repo.refetch_interval_minutes * 60
