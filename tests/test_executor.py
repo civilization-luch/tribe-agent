@@ -140,3 +140,52 @@ async def test_executor_ignores_all_communities_when_not_configured(tmp_path: Pa
     await queue.close()
     assert count == 2
     assert {t.payload.get("issue_id") for t in tasks} == {"i1", "i2"}
+
+
+async def test_executor_uses_default_repo_when_workspace_unbound(tmp_path: Path):
+    config = load_config(profile="community")
+    config.community.user_id = "bot1"
+    config.repo.default_url = "https://default.example/r"
+    config.repo.default_branch = "dev"
+    config.data_dir = str(tmp_path)
+    queue = TaskQueue(tmp_path / "agent.db")
+    await queue.connect()
+    client = FakeClient({"id": "w1", "repoUrl": "", "repoBranch": ""})
+    repo = FakeRepo()
+    ctx = ScanContext(
+        config=config,
+        client=client,  # type: ignore[arg-type]
+        queue=queue,
+        repo=repo,  # type: ignore[arg-type]
+        logger=logging.getLogger("test"),
+    )
+    count = await ExecutorModule()._scan(ctx)
+    tasks = await queue.dequeue_batch("execute", 10)
+    await queue.close()
+    assert count == 1
+    assert repo.ensure_calls == [("w1", "https://default.example/r", "dev")]
+    assert tasks[0].repo_path == "/tmp/repo"
+    assert tasks[0].payload["branch"] == "dev"
+    assert tasks[0].payload["repo_url"] == "https://default.example/r"
+
+
+async def test_executor_workspace_repo_wins_over_default(tmp_path: Path):
+    config = load_config(profile="community")
+    config.community.user_id = "bot1"
+    config.repo.default_url = "https://default.example/r"
+    config.data_dir = str(tmp_path)
+    queue = TaskQueue(tmp_path / "agent.db")
+    await queue.connect()
+    client = FakeClient({"id": "w1", "repoUrl": "https://w.example/r", "repoBranch": "main"})
+    repo = FakeRepo()
+    ctx = ScanContext(
+        config=config,
+        client=client,  # type: ignore[arg-type]
+        queue=queue,
+        repo=repo,  # type: ignore[arg-type]
+        logger=logging.getLogger("test"),
+    )
+    count = await ExecutorModule()._scan(ctx)
+    await queue.close()
+    assert count == 1
+    assert repo.ensure_calls == [("w1", "https://w.example/r", "main")]

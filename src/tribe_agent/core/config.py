@@ -44,6 +44,8 @@ class RepoConfig(BaseModel):
     update: str = "lazy"
     git_token: str = ""
     refetch_interval_minutes: int = 60
+    default_url: str = ""
+    default_branch: str = ""
 
 
 class ConcurrencyConfig(BaseModel):

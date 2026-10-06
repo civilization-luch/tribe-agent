@@ -30,6 +30,8 @@ repo:
   strategy: shallow
   update: lazy
   refetch_interval_minutes: 60
+  default_url: ""
+  default_branch: ""
   git_token: ""
 
 concurrency:

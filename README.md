@@ -75,6 +75,21 @@ Credentials are provided via environment (`.env` in `docker/`), never baked into
 
 `docker compose down -v` removes the volumes and therefore wipes credentials and sessions.
 
+## Repository resolution
+
+A task reaches a repository through this chain (first match wins):
+
+1. `module_settings.executor.repos[<workspace_id>]` — local per-workspace override;
+2. `workspace(id).repoUrl` — the workspace-bound repository
+   (`metadata.repository` in the platform);
+3. `repo.default_url` — the agent's **single repository**, a fallback for any
+   workspace without its own binding (this is the classic "platform repository"
+   the agent used to know);
+4. `project_path` — a manual working directory as a last fallback.
+
+This way the platform agent can keep working against ONE repository while
+communities still run per-workspace repositories.
+
 ## Pushing work
 
 By default the executor commits changes only inside its local clone

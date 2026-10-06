@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from tribe_agent.core.client.graphql import WORKSPACE_REPO
 from tribe_agent.core.config import AppConfig
 from tribe_agent.core.module import Module, ScanContext, Scanner, TaskSpec
 from tribe_agent.core.queue import Task
@@ -14,10 +15,6 @@ query($assigneeId: String!) {
     id title description status workspaceId communityId priority labels
   }
 }
-"""
-
-WORKSPACE_REPO = """
-query($id: String!) { workspace(id: $id) { id repoUrl repoBranch } }
 """
 
 
@@ -103,6 +100,9 @@ class ExecutorModule(Module):
             url, branch = self._repo_override(ctx, workspace_id)
             if not url:
                 url, branch = await self._repo_from_graphql(ctx, workspace_id, cache)
+            if not url and ctx.config.repo.default_url:
+                url = ctx.config.repo.default_url
+                branch = ctx.config.repo.default_branch or branch
             repo_path = ""
             if url:
                 try:

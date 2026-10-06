@@ -11,6 +11,11 @@ class GraphQLError(Exception):
     pass
 
 
+WORKSPACE_REPO = """
+query($id: String!) { workspace(id: $id) { id repoUrl repoBranch } }
+"""
+
+
 class GraphQLClient:
     def __init__(self, url: str, token: str = "", timeout: float = 30.0) -> None:
         self.url = url
