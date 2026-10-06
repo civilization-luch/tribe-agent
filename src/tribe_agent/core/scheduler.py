@@ -225,13 +225,18 @@ class Runner:
         base_sha = ""
         if push_enabled and items and items[0].repo_path:
             payload = items[0].payload
-            base_branch = payload.get("branch", "") or ctx.repo.stored_branch(directory)
             if push_mode == "branch":
                 workspace_id = payload.get("workspace_id", "")
                 issue_id = payload.get("issue_id", "")
+                base_branch = (
+                    payload.get("branch", "")
+                    or ctx.config.repo.default_branch
+                    or "main"
+                )
                 push_target = f"{branch_prefix}/{workspace_id[:8]}-i{issue_id[:8]}"
-                await ctx.repo.checkout_branch(directory, push_target, base_branch)
+                await ctx.repo.create_branch_from(directory, push_target, base_branch)
             else:
+                base_branch = payload.get("branch", "") or ctx.repo.stored_branch(directory)
                 push_target = base_branch or ctx.repo.head_branch(directory)
             base_sha = ctx.repo.head_sha(directory)
             if open_pr and push_mode != "branch":
@@ -258,6 +263,8 @@ class Runner:
                         await self._comment_pushed(ctx, items, push_target, pr_url)
                     except Exception as exc:  # noqa: BLE001
                         ctx.logger.warning("push failed for %s: %s", directory, exc)
+            if pr_url:
+                await self._keep_issue_open(ctx, items)
             result_data = {"session_id": result.session_id}
             pr_repo, pr_number = _pr_info(pr_url)
             if pr_repo and pr_number:
@@ -295,6 +302,20 @@ class Runner:
                 )
             except Exception as exc:  # noqa: BLE001
                 ctx.logger.warning("push comment failed for issue %s: %s", issue_id, exc)
+
+    async def _keep_issue_open(self, ctx: ScanContext, items: list[Task]) -> None:
+        for task in items:
+            issue_id = task.payload.get("issue_id")
+            if not issue_id:
+                continue
+            try:
+                await ctx.client.gql(
+                    "mutation($id:String!){"
+                    " setIssueStatus(input:{issueId:$id,status:\"open\"}){ id status } }",
+                    {"id": issue_id},
+                )
+            except Exception as exc:  # noqa: BLE001
+                ctx.logger.warning("keep-open after PR failed for issue %s: %s", issue_id, exc)
 
     async def _open_pr(
         self, ctx: ScanContext, items: list[Task], head: str, base: str

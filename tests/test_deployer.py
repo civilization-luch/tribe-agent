@@ -229,6 +229,11 @@ async def test_approved_closed_issue_rejected():
     assert await _approved(_issue(status="closed", comments=human)) is False
 
 
+async def test_approved_resolved_issue_accepted():
+    human = [{"id": "c1", "author": {"id": "HUMAN"}, "body": "деплой"}]
+    assert await _approved(_issue(status="resolved", comments=human)) is True
+
+
 async def test_approved_uses_configured_keywords():
     human = [{"id": "c1", "author": {"id": "HUMAN"}, "body": "деплой"}]
     assert await _approved(_issue(comments=human), keywords_override=["погнали"]) is False

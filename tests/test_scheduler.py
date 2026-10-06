@@ -76,6 +76,9 @@ class StubRepo:
     async def checkout_branch(self, path: Path, name: str, base: str = "") -> None:
         self.checkouts.append((str(path), name, base))
 
+    async def create_branch_from(self, path: Path, name: str, base: str) -> None:
+        self.checkouts.append((str(path), name, base))
+
     async def push(self, path: Path, target: str) -> None:
         if self._fail_push:
             raise RuntimeError("push failed")
@@ -329,6 +332,7 @@ async def test_execute_branch_mode_opens_pr(monkeypatch):
     assert calls["base"] == "main"
     assert repo.checkouts[0][1] == calls["head"]
     assert "PR: https://github.com/o/r/pull/9" in client.messages[0]["body"]
+    assert {"id": "i1"} in client.messages
     assert not queue.failed
 
 

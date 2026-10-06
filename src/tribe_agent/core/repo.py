@@ -68,6 +68,16 @@ class RepoManager:
             cmd.append(base)
         await asyncio.to_thread(self._git, cmd, path)
 
+    async def create_branch_from(self, path: Path, name: str, base: str) -> None:
+        ref = base or "main"
+        await asyncio.to_thread(
+            self._git, ["git", "-C", str(path), "fetch", "--prune", "origin", ref], path
+        )
+        await asyncio.to_thread(self._git, ["git", "-C", str(path), "reset", "--hard"], path)
+        await asyncio.to_thread(
+            self._git, ["git", "-C", str(path), "checkout", "-B", name, f"origin/{ref}"], path
+        )
+
     async def push(self, path: Path, target: str) -> None:
         await asyncio.to_thread(
             self._git,

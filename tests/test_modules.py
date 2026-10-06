@@ -204,3 +204,15 @@ def test_classifier_skill_self_assigns_on_accepted():
     assert "assign the issue to yourself" in text
     assert "whoami" in text
     assert "NEVER reports commits/SHAs" in text
+
+
+def test_notifications_agent_never_proposes_plans():
+    text = _read_packaged("opencode/agents/tribe-notifications.md")
+    assert "do NOT post an implementation plan" in text
+    assert "never propose a plan" in text
+    assert "NOT the implementer" in text
+
+
+def test_notifications_skill_never_proposes_plans():
+    text = _read_packaged("opencode/skills/tribe-notifications/SKILL.md")
+    assert "never post solution plans or ask for approval" in text

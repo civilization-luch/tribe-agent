@@ -156,7 +156,7 @@ class DeployerModule(Module):
         issue = (data or {}).get("issue") or {}
         if not issue:
             return False
-        if issue.get("status") != "open":
+        if issue.get("status") not in ("open", "resolved"):
             return False
         labels = issue.get("labels") or []
         if DEPLOY_LABEL in labels:
