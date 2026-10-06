@@ -28,6 +28,14 @@ def build_runtime(config: AppConfig) -> CodingRuntime:
 
 async def scanner_loop(scanner: Scanner, ctx: ScanContext) -> None:
     while True:
+        if await _backpressure_exceeded(ctx):
+            ctx.logger.warning(
+                "queue at capacity (>=%d pending), skipping scanner %s",
+                ctx.config.concurrency.max_queue,
+                scanner.name,
+            )
+            await asyncio.sleep(scanner.interval)
+            continue
         try:
             count = await scanner.run(ctx)
             if count:
@@ -35,6 +43,14 @@ async def scanner_loop(scanner: Scanner, ctx: ScanContext) -> None:
         except Exception as exc:  # noqa: BLE001
             ctx.logger.warning("scanner %s failed: %s", scanner.name, exc)
         await asyncio.sleep(scanner.interval)
+
+
+async def _backpressure_exceeded(ctx: ScanContext) -> bool:
+    limit = ctx.config.concurrency.max_queue
+    if limit <= 0:
+        return False
+    pending = await ctx.queue.count_pending()
+    return pending >= limit
 
 
 class Runner:
