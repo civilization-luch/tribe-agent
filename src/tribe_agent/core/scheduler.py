@@ -133,10 +133,17 @@ class Runner:
         specs, _ = self._collect()
         runtime = build_runtime(self.config)
         try:
+            await self._recover_stale(ctx)
             await self._drain_once(ctx, specs, runtime)
         finally:
             await client.close()
             await queue.close()
+
+    async def _recover_stale(self, ctx: ScanContext) -> None:
+        stale_minutes = ctx.config.intervals.get("stale_reset_minutes", 30)
+        recovered = await ctx.queue.reset_stale(timeout_minutes=stale_minutes)
+        if recovered:
+            ctx.logger.info("recovered %d stale running task(s)", recovered)
 
     async def _executor_loop(
         self, ctx: ScanContext, specs: dict[str, TaskSpec], runtime: CodingRuntime
@@ -145,6 +152,7 @@ class Runner:
         running: set[asyncio.Task[None]] = set()
         interval = ctx.config.intervals.get("run_agent", 60)
         while True:
+            await self._recover_stale(ctx)
             ran = await self._drain_once(ctx, specs, runtime, sem=sem, running=running)
             if not ran:
                 await asyncio.sleep(interval)
