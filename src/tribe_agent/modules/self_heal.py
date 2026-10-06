@@ -10,6 +10,14 @@ TOTAL_OPEN = """
 query($communityId: String!) { totalIssues(communityId: $communityId, status: "open") }
 """
 
+OPEN_ISSUES = """
+query($communityId: String!, $status: String!) {
+  issues(communityId: $communityId, status: $status, limit: 100) { id title labels }
+}
+"""
+
+HEALTH_TITLE = "Issue backlog growing"
+
 
 class SelfHealModule(Module):
     id = "self_heal"
@@ -23,6 +31,11 @@ class SelfHealModule(Module):
 
         def build_prompt(batch: list[Task]) -> str:
             lines = ["@tribe-self-healer", ""]
+            lines.append(
+                'Do NOT create a new "' + HEALTH_TITLE + '" if one is already open — '
+                "update the existing open issue with a comment instead."
+            )
+            lines.append("")
             for index, task in enumerate(batch, 1):
                 payload = task.payload
                 lines.append(
@@ -42,6 +55,22 @@ class SelfHealModule(Module):
             )
         }
 
+    async def _open_health_issue_exists(self, ctx: ScanContext, community_id: str) -> bool:
+        try:
+            data = await ctx.client.gql(OPEN_ISSUES, {"communityId": community_id, "status": "open"})
+            issues = data.get("issues", []) or []
+        except Exception as exc:  # noqa: BLE001
+            ctx.logger.warning("self_heal health lookup failed for %s: %s", community_id, exc)
+            return False
+        for issue in issues:
+            title = issue.get("title", "") or ""
+            labels = issue.get("labels", []) or []
+            if HEALTH_TITLE in title:
+                return True
+            if "auto" in labels and "health" in labels:
+                return True
+        return False
+
     async def _scan(self, ctx: ScanContext) -> int:
         threshold = int(ctx.config.module_config("self_heal").get("open_issues_threshold", 20))
         communities = ctx.config.community.communities
@@ -54,6 +83,11 @@ class SelfHealModule(Module):
                 continue
             total = int(data.get("totalIssues", 0) or 0)
             if total < threshold:
+                continue
+            if await self._open_health_issue_exists(ctx, community_id):
+                ctx.logger.info(
+                    "self_heal: open health issue already exists for %s, skipping", community_id
+                )
                 continue
             task_id = await ctx.queue.enqueue(
                 "self_heal",

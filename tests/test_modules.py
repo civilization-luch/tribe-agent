@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import logging
+
 from tribe_agent.core.config import load_config
+from tribe_agent.core.module import ScanContext
 from tribe_agent.core.queue import Task
 from tribe_agent.modules import load_modules
 from tribe_agent.modules.announcements import AnnouncementsModule
 from tribe_agent.modules.classify import ClassifyModule
 from tribe_agent.modules.executor import ExecutorModule
 from tribe_agent.modules.notifications import NotificationsModule
+from tribe_agent.modules.self_heal import SelfHealModule
 
 
 def _task(task_type: str, payload: dict, **kwargs) -> Task:
@@ -83,3 +87,72 @@ def test_announcements_prompt_contains_config():
     prompt = spec.build_prompt([_task("announcement", {"sha": "abcdef12", "message": "feat: x"})])
     assert "Frequency: daily" in prompt
     assert "abcdef12" in prompt
+
+
+class StubScalarClient:
+    def __init__(self, total: int, open_issues: list[dict] | None = None) -> None:
+        self._total = total
+        self._open = open_issues or []
+
+    async def gql(self, query: str, variables: dict | None = None) -> dict:
+        if "totalIssues" in query:
+            return {"totalIssues": self._total}
+        if "issues(" in query:
+            return {"issues": self._open}
+        return {}
+
+
+class StubScalarQueue:
+    def __init__(self) -> None:
+        self.enqueued: list[tuple] = []
+
+    async def enqueue(self, task_type: str, payload: dict, **kwargs) -> int:
+        self.enqueued.append((task_type, payload, kwargs))
+        return len(self.enqueued)
+
+
+def _scan_ctx(client, queue) -> ScanContext:
+    config = load_config(profile="community")
+    config.community.communities = ["platform"]
+    return ScanContext(
+        config=config,
+        client=client,  # type: ignore[arg-type]
+        queue=queue,  # type: ignore[arg-type]
+        repo=None,  # type: ignore[arg-type]
+        logger=logging.getLogger("test"),
+    )
+
+
+def test_self_heal_prompt_contains_no_duplicate_guidance():
+    module = SelfHealModule()
+    spec = module.tasks(load_config(profile="community"))["self_heal"]
+    prompt = spec.build_prompt([_task("self_heal", {"community_id": "c1", "open_issues": 39})])
+    assert "Do NOT create a new" in prompt
+    assert "Issue backlog growing" in prompt
+
+
+async def test_self_heal_skips_when_open_health_issue_exists():
+    module = SelfHealModule()
+    client = StubScalarClient(
+        39, [{"id": "h1", "title": "Issue backlog growing", "labels": ["auto", "health"]}]
+    )
+    queue = StubScalarQueue()
+    assert await module._scan(_scan_ctx(client, queue)) == 0
+    assert queue.enqueued == []
+
+
+async def test_self_heal_enqueues_when_no_open_health_issue():
+    module = SelfHealModule()
+    client = StubScalarClient(39, [{"id": "x", "title": "Other", "labels": []}])
+    queue = StubScalarQueue()
+    assert await module._scan(_scan_ctx(client, queue)) == 1
+    assert queue.enqueued[0][0] == "self_heal"
+    assert queue.enqueued[0][1]["open_issues"] == 39
+
+
+async def test_self_heal_skips_below_threshold():
+    module = SelfHealModule()
+    client = StubScalarClient(5, [])
+    queue = StubScalarQueue()
+    assert await module._scan(_scan_ctx(client, queue)) == 0
+    assert queue.enqueued == []
