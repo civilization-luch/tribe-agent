@@ -17,6 +17,7 @@ repo:
   root: ./data/repos       # where workspace repositories are cloned
   strategy: shallow        # shallow | full
   update: lazy             # lazy (fetch before task) | interval
+  refetch_interval_minutes: 60   # for update: interval — min time between fetches
   git_token: ""            # optional HTTPS token for private repos
 
 concurrency:

@@ -29,6 +29,7 @@ repo:
   root: ./data/repos
   strategy: shallow
   update: lazy
+  refetch_interval_minutes: 60
   git_token: ""
 
 concurrency:

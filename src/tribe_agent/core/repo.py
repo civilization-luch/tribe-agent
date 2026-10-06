@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 import subprocess
+import time
 from pathlib import Path
 
 from tribe_agent.core.config import AppConfig
@@ -23,6 +24,7 @@ class RepoManager:
         self.root = root if root.is_absolute() else (Path.cwd() / root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self._locks: dict[str, asyncio.Lock] = {}
+        self._last_fetch: dict[str, float] = {}
 
     def _lock(self, key: str) -> asyncio.Lock:
         return self._locks.setdefault(key, asyncio.Lock())
@@ -46,9 +48,21 @@ class RepoManager:
         async with self._lock(path.name):
             if not (path / ".git").is_dir():
                 await self._clone(url, branch, path)
+                self._last_fetch[str(path)] = time.monotonic()
+            elif self.config.repo.update == "interval":
+                if self._should_refetch(str(path)):
+                    await self._fetch(path, branch)
             elif self.config.repo.update == "lazy":
                 await self._fetch(path, branch)
         return path
+
+    def _should_refetch(self, path: str) -> bool:
+        now = time.monotonic()
+        interval = self.config.repo.refetch_interval_minutes * 60
+        if now - self._last_fetch.get(path, 0.0) < interval:
+            return False
+        self._last_fetch[path] = now
+        return True
 
     async def _clone(self, url: str, branch: str, path: Path) -> None:
         cmd = ["git", "clone"]

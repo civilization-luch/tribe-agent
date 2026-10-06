@@ -43,6 +43,7 @@ class RepoConfig(BaseModel):
     strategy: str = "shallow"
     update: str = "lazy"
     git_token: str = ""
+    refetch_interval_minutes: int = 60
 
 
 class ConcurrencyConfig(BaseModel):
