@@ -57,7 +57,7 @@ def test_notifications_prompt_contains_events():
 def test_classify_prompt_contains_issue():
     module = ClassifyModule()
     prompt = module._build_prompt(
-        [_task("classify", {"issue_id": "i1", "title": "Bug", "description": "broken", "author_id": "u1"})]
+        [_task("classify", {"issue_id": "i1", "title": "Bug", "description": "broken"})]
     )
     assert "@tribe-classifier" in prompt
     assert "issue_id=i1" in prompt

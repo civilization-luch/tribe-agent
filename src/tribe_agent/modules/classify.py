@@ -9,7 +9,7 @@ from tribe_agent.core.queue import Task
 LIST_ISSUES = """
 query($workspaceId: String!) {
   issues(workspaceId: $workspaceId, status: "open", limit: 100) {
-    id title description authorId communityId workspaceId
+    id title description communityId workspaceId
   }
 }
 """
@@ -50,7 +50,6 @@ class ClassifyModule(Module):
                     "issue_id": issue_id,
                     "title": issue.get("title", ""),
                     "description": issue.get("description", ""),
-                    "author_id": issue.get("authorId", ""),
                     "community_id": issue.get("communityId", ""),
                     "workspace_id": issue.get("workspaceId", workspace_id),
                 },
@@ -73,6 +72,5 @@ class ClassifyModule(Module):
                 f" community={payload.get('community_id', '?')}"
                 f'\n   title: "{payload.get("title", "")[:200]}"'
                 f'\n   description: "{description}"'
-                f"\n   by author_id={payload.get('author_id', '?')}"
             )
         return "\n".join(lines)
