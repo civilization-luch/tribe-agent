@@ -1,0 +1,177 @@
+"""Deployer module — deploy merged PRs to production after human approval.
+
+Scans executed executor tasks that opened a Pull Request, waits until the PR is
+merged on GitHub AND the issue carries the human-set approval label, then runs the
+server-side deploy script via a forced-command SSH key.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import re
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+import httpx
+
+from tribe_agent.core.config import AppConfig
+from tribe_agent.core.module import Module, ScanContext, Scanner
+
+DEPLOY_LABEL = "deploy:approved"
+
+ISSUE_GATE = """
+query($id: String!) { issue(id: $id) { id status labels } }
+"""
+ADD_COMMENT = """
+mutation($id: String!, $body: String!) {
+  createComment(parentId: $id, parentType: "issue", body: $body) { id }
+}
+"""
+SET_STATUS = """
+mutation($id: String!, $status: String!) {
+  setIssueStatus(input: {issueId: $id, status: $status}) { id status }
+}
+"""
+
+
+class DeployerModule(Module):
+    id = "deployer"
+
+    def scanners(self, config: AppConfig) -> list[Scanner]:
+        interval = config.intervals.get("deployer", 300)
+        return [Scanner("deployer", interval, self._scan)]
+
+    def tasks(self, config: AppConfig) -> dict[str, Any]:
+        return {}
+
+    def _settings(self, ctx: ScanContext) -> dict[str, Any]:
+        return ctx.config.module_config("deployer") or {}
+
+    def _ssh_key(self, ctx: ScanContext) -> Path:
+        configured = self._settings(ctx).get("ssh_key", "")
+        if configured:
+            return Path(configured).expanduser()
+        return ctx.config.data_path / "keys" / "deploy_rsa"
+
+    async def _scan(self, ctx: ScanContext) -> int:
+        settings = self._settings(ctx)
+        target_repo = settings.get("repo", "civilization-luch/tribe")
+        deployed = 0
+        for task in await ctx.queue.list_completed("execute"):
+            result = task.result or {}
+            if not result.get("pr_number") or result.get("deployed"):
+                continue
+            repo = (result.get("repo") or "").strip()
+            if target_repo and repo and not _same_repo(repo, target_repo):
+                continue
+            issue_id = task.payload.get("issue_id", "")
+            if not issue_id:
+                continue
+            if not await self._pr_merged(ctx, repo or target_repo, result["pr_number"]):
+                continue
+            if not await self._approved(ctx, issue_id):
+                continue
+            ok, sha = await self._run_deploy(ctx)
+            if not ok:
+                ctx.logger.warning("deploy failed for issue %s", issue_id)
+                continue
+            await self._after(ctx, issue_id, sha)
+            await ctx.queue.update_result(
+                task.id,
+                deployed=True,
+                deployed_sha=sha,
+                deployed_at=datetime.now(UTC).isoformat(),
+            )
+            deployed += 1
+        return deployed
+
+    async def _pr_merged(self, ctx: ScanContext, repo: str, pr_number: int) -> bool:
+        token = ctx.config.repo.git_token
+        headers = {"Accept": "application/vnd.github+json"}
+        if token:
+            headers["Authorization"] = f"token {token}"
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                response = await client.get(
+                    f"https://api.github.com/repos/{repo}/pulls/{pr_number}",
+                    headers=headers,
+                )
+            if response.status_code != 200:
+                return False
+            data = response.json()
+            return bool(data.get("merged")) and data.get("state") == "closed"
+        except Exception as exc:  # noqa: BLE001
+            ctx.logger.warning("PR check failed for %s#%s: %s", repo, pr_number, exc)
+            return False
+
+    async def _approved(self, ctx: ScanContext, issue_id: str) -> bool:
+        try:
+            data = await ctx.client.gql(ISSUE_GATE, {"id": issue_id})
+        except Exception as exc:  # noqa: BLE001
+            ctx.logger.warning("issue gate check failed for %s: %s", issue_id, exc)
+            return False
+        issue = (data or {}).get("issue") or {}
+        if not issue:
+            return False
+        if issue.get("status") != "open":
+            return False
+        labels = issue.get("labels") or []
+        return DEPLOY_LABEL in labels
+
+    async def _run_deploy(self, ctx: ScanContext) -> tuple[bool, str]:
+        settings = self._settings(ctx)
+        host = settings.get("ssh_host", "64.226.102.165")
+        user = settings.get("ssh_user", "deploy")
+        key_path = self._ssh_key(ctx)
+        if not key_path.is_file():
+            ctx.logger.warning("deploy key missing: %s", key_path)
+            return False, ""
+        command = [
+            "ssh",
+            "-i", str(key_path),
+            "-o", "IdentitiesOnly=yes",
+            "-o", "BatchMode=yes",
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "ConnectTimeout=15",
+            f"{user}@{host}",
+        ]
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, err = await asyncio.wait_for(process.communicate(), timeout=240)
+        except Exception as exc:  # noqa: BLE001
+            ctx.logger.warning("deploy ssh failed: %s", exc)
+            return False, ""
+        stdout = out.decode("utf-8", errors="replace")
+        stderr = err.decode("utf-8", errors="replace")
+        match = re.search(r"deployed\s+([0-9a-f]{7,40})", stdout)
+        if process.returncode == 0 and match:
+            return True, match.group(1)
+        ctx.logger.warning(
+            "deploy ssh rc=%s out=%r err=%r",
+            process.returncode,
+            stdout[-300:],
+            stderr[-300:],
+        )
+        return False, ""
+
+    async def _after(self, ctx: ScanContext, issue_id: str, sha: str) -> None:
+        body = f"Deployed to prod: main `{sha}`."
+        try:
+            await ctx.client.gql(ADD_COMMENT, {"id": issue_id, "body": body})
+            await ctx.client.gql(SET_STATUS, {"id": issue_id, "status": "resolved"})
+        except Exception as exc:  # noqa: BLE001
+            ctx.logger.warning("deploy follow-up failed for %s: %s", issue_id, exc)
+
+
+def _same_repo(a: str, b: str) -> bool:
+    def normalized(repo: str) -> str:
+        value = repo.strip().removesuffix(".git")
+        parts = [part for part in value.split("/") if part]
+        return "/".join(parts[-2:])
+
+    return normalized(a) == normalized(b)

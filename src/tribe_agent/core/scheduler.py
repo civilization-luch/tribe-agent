@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -25,6 +26,15 @@ def build_runtime(config: AppConfig) -> CodingRuntime:
     if config.runtime == "codex":
         return CodexRuntime(config)
     return OpencodeRuntime(config)
+
+
+def _pr_info(pr_url: str) -> tuple[str, int]:
+    if not pr_url:
+        return "", 0
+    match = re.search(r"github\.com/([^/]+/[^/]+)/pull/(\d+)", pr_url)
+    if not match:
+        return "", 0
+    return match.group(1), int(match.group(2))
 
 
 async def scanner_loop(scanner: Scanner, ctx: ScanContext) -> None:
@@ -248,8 +258,14 @@ class Runner:
                         await self._comment_pushed(ctx, items, push_target, pr_url)
                     except Exception as exc:  # noqa: BLE001
                         ctx.logger.warning("push failed for %s: %s", directory, exc)
+            result_data = {"session_id": result.session_id}
+            pr_repo, pr_number = _pr_info(pr_url)
+            if pr_repo and pr_number:
+                result_data.update(
+                    {"repo": pr_repo, "pr_number": pr_number, "pr_url": pr_url}
+                )
             for task in items:
-                await ctx.queue.complete(task.id, {"session_id": result.session_id})
+                await ctx.queue.complete(task.id, result_data)
             if spec.on_success:
                 await spec.on_success(items, ctx)
             logger.info("%s: OK %d task(s) session=%s", spec.task_type, len(items), result.session_id)

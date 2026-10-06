@@ -51,3 +51,25 @@ async def test_reset_stale(queue: TaskQueue):
     reset = await queue.reset_stale(timeout_minutes=0)
     assert reset == 1
     assert await queue.count_pending("classify") == 1
+
+
+async def test_list_completed_and_update_result(queue: TaskQueue):
+    await queue.enqueue("execute", {"issue_id": "i1"}, dedup_key="i1")
+    batch = await queue.dequeue_batch("execute", 1)
+    await queue.complete(batch[0].id, {"pr_number": 9, "repo": "civilization-luch/tribe"})
+
+    done = await queue.list_completed("execute")
+    assert len(done) == 1
+    assert done[0].result == {"pr_number": 9, "repo": "civilization-luch/tribe"}
+    assert done[0].payload == {"issue_id": "i1"}
+
+    await queue.update_result(done[0].id, deployed=True, deployed_sha="abc1234")
+    again = await queue.list_completed("execute")
+    assert again[0].result == {
+        "pr_number": 9,
+        "repo": "civilization-luch/tribe",
+        "deployed": True,
+        "deployed_sha": "abc1234",
+    }
+
+    assert await queue.list_completed("notification") == []

@@ -173,3 +173,39 @@ class TaskQueue:
             cursor = await self.conn.execute("SELECT COUNT(*) FROM tasks WHERE status='pending'")
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
+
+    async def list_completed(self, task_type: str) -> list[Task]:
+        cursor = await self.conn.execute(
+            """
+            SELECT id, task_type, status, community_id, workspace_id, repo_path,
+                   payload, created_at, result, error
+            FROM tasks WHERE status = 'completed' AND task_type = ?
+            ORDER BY id ASC
+            """,
+            (task_type,),
+        )
+        rows = await cursor.fetchall()
+        return [Task(
+            id=row["id"],
+            task_type=row["task_type"],
+            status=row["status"],
+            community_id=row["community_id"],
+            workspace_id=row["workspace_id"],
+            repo_path=row["repo_path"],
+            payload=_parse(row["payload"]),
+            created_at=row["created_at"],
+            result=_parse(row["result"]) if row["result"] else None,
+            error=row["error"],
+        ) for row in rows]
+
+    async def update_result(self, task_id: int, **patches: Any) -> None:
+        cursor = await self.conn.execute("SELECT result FROM tasks WHERE id=?", (task_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            return
+        result = _parse(row["result"]) or {}
+        result.update(patches)
+        await self.conn.execute(
+            "UPDATE tasks SET result=? WHERE id=?", (json.dumps(result), task_id)
+        )
+        await self.conn.commit()

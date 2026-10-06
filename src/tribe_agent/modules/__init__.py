@@ -9,6 +9,7 @@ from tribe_agent.core.module import Module
 from tribe_agent.modules.announcements import AnnouncementsModule
 from tribe_agent.modules.assistant import AssistantModule
 from tribe_agent.modules.classify import ClassifyModule
+from tribe_agent.modules.deployer import DeployerModule
 from tribe_agent.modules.executor import ExecutorModule
 from tribe_agent.modules.notifications import NotificationsModule
 from tribe_agent.modules.self_heal import SelfHealModule
@@ -21,6 +22,7 @@ ALL_MODULES: list[type[Module]] = [
     AnnouncementsModule,
     ExecutorModule,
     SelfHealModule,
+    DeployerModule,
     AssistantModule,
 ]
 
