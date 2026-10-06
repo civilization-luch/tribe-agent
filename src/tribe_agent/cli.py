@@ -125,8 +125,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     )
     check(
         "project or repo binding",
-        bool(config.project_path) or bool(config.module_settings.get("executor", {}).get("repos")),
-        "set project_path or executor.repos",
+        bool(config.project_path)
+        or bool(config.module_settings.get("executor", {}).get("repos"))
+        or bool(config.repo.default_url),
+        "set project_path, repo.default_url or executor.repos",
     )
 
     if config.community.api_url and config.community.bot_token:

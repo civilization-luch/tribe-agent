@@ -17,3 +17,4 @@ data/
 *.log
 config.yaml
 docker/config.yaml
+config.platform.yaml
