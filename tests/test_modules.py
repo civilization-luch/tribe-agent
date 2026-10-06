@@ -185,6 +185,20 @@ def test_executor_agent_must_not_invent_shas():
     assert "no commit found yet" in text
 
 
+def test_executor_agent_does_not_resolve_with_open_pr():
+    text = _read_packaged("opencode/agents/tribe-task-executor.md")
+    assert 'UNLESS a Pull Request was opened' in text
+    assert 'leave the issue\n   `open`' in text or "leave the issue" in text
+    assert "awaiting merge + deploy" in text
+
+
+def test_executor_agent_never_deploys():
+    text = _read_packaged("opencode/agents/tribe-task-executor.md")
+    assert "Deployment is OUTSIDE your scope" in text
+    assert "NEVER attempt to deploy" in text
+    assert "in prod" in text or '"deployed"' in text
+
+
 def test_classifier_skill_self_assigns_on_accepted():
     text = _read_packaged("opencode/skills/tribe-classifier/SKILL.md")
     assert "assign the issue to yourself" in text

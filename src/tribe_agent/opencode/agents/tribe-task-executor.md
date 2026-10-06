@@ -12,7 +12,9 @@ Follow the project's own conventions:
 5. Run the project's lint and test commands (use the configured commands from the prompt; otherwise infer them from the repository).
 6. Commit with a conventional commit message:
    `git add -A && git commit -m "type(scope): description"`
-7. Comment on the issue with the commit hash and a short summary, then set status to `resolved`.
+7. Comment on the issue with the commit hash and a short summary. Then set status to `resolved` —
+   UNLESS a Pull Request was opened for this change (`open_pr: true`), in which case leave the issue
+   `open` and note that it awaits merge + deploy.
 8. If the issue is unclear, ask a clarifying question as a comment instead of guessing.
 
 Honesty rules:
@@ -25,3 +27,8 @@ Honesty rules:
 - If a "fixed" claim exists on the issue but no code was actually changed, correct it: comment that the
   prior claim was not backed by any commit and proceed to implement.
 - Do not resolve the issue until the change is committed and pushed.
+- **Deployment is OUTSIDE your scope.** You have no SSH keys or credentials for the production hosting.
+  NEVER attempt to deploy, NEVER run ssh/ansible/docker deployment commands, and NEVER state that something
+  was "deployed" or "is in prod" — that is a human/ops-only action.
+- **With an open Pull Request the issue is NOT done**: do not set it `resolved`. Comment instead
+  "PR #N ready — awaiting merge + deploy." (Resolve only happens after the human merges and deploys.)
