@@ -11,7 +11,9 @@ runtime (opencode now, codex later) inside the user's project repository.
 ## Install
 
 ```bash
-pip install tribe-agent          # or: uv tool install tribe-agent
+git clone https://github.com/civilization-luch/tribe-agent
+cd tribe-agent
+uv venv && uv pip install -e .          # or: pip install .
 tribe-agent init                 # write config.yaml
 tribe-agent doctor               # verify token, API, runtime
 tribe-agent run                  # start the scheduler
