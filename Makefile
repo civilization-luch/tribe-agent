@@ -1,4 +1,4 @@
-.PHONY: install run scan run-queue doctor test lint
+.PHONY: install run scan run-queue doctor test test-integration test-all lint
 
 install:
 	uv pip install -e ".[dev]"
@@ -16,6 +16,12 @@ doctor:
 	.venv/bin/tribe-agent doctor
 
 test:
+	.venv/bin/python -m pytest -q -m "not integration"
+
+test-integration:
+	.venv/bin/python -m pytest -q -m integration
+
+test-all:
 	.venv/bin/python -m pytest -q
 
 lint:
