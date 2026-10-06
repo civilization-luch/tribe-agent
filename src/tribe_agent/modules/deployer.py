@@ -1,8 +1,9 @@
 """Deployer module — deploy merged PRs to production after human approval.
 
-Scans executed executor tasks that opened a Pull Request, waits until the PR is
-merged on GitHub AND the issue carries the human-set approval label, then runs the
-server-side deploy script via a forced-command SSH key.
+Scans executed executor tasks that opened a Pull Request. Deploys only when the PR
+is merged on GitHub AND the human confirmed the deploy: either the `deploy:approved`
+label or a free-form comment (keywords, configurable) from a non-bot author. If the
+PR is not merged yet, posts a one-time reminder instead of deploying.
 """
 
 from __future__ import annotations
@@ -20,8 +21,13 @@ from tribe_agent.core.module import Module, ScanContext, Scanner
 
 DEPLOY_LABEL = "deploy:approved"
 
+DEFAULT_KEYWORDS = ["задеплой", "задеплойте", "деплой", "деплойте", "покати", "deploy"]
+DEFAULT_NEGATIONS = ["не", "отмена", "отменить", "отбой", "стоп", "stop", "cancel"]
+
 ISSUE_GATE = """
-query($id: String!) { issue(id: $id) { id status labels } }
+query($id: String!) {
+  issue(id: $id) { id status labels comments { id author { id } body } }
+}
 """
 ADD_COMMENT = """
 mutation($id: String!, $body: String!) {
@@ -68,9 +74,14 @@ class DeployerModule(Module):
             issue_id = task.payload.get("issue_id", "")
             if not issue_id:
                 continue
-            if not await self._pr_merged(ctx, repo or target_repo, result["pr_number"]):
+            merged = await self._pr_merged(ctx, repo or target_repo, result["pr_number"])
+            approved = await self._approved(ctx, issue_id)
+            if not merged:
+                if approved and not result.get("reminded"):
+                    await self._remind(ctx, issue_id, repo or target_repo, result["pr_number"])
+                    await ctx.queue.update_result(task.id, reminded=True)
                 continue
-            if not await self._approved(ctx, issue_id):
+            if not approved:
                 continue
             ok, sha = await self._run_deploy(ctx)
             if not ok:
@@ -117,7 +128,33 @@ class DeployerModule(Module):
         if issue.get("status") != "open":
             return False
         labels = issue.get("labels") or []
-        return DEPLOY_LABEL in labels
+        if DEPLOY_LABEL in labels:
+            return True
+        settings = self._settings(ctx)
+        keywords = [str(k).lower() for k in settings.get("keywords", DEFAULT_KEYWORDS)]
+        negations = [str(k).lower() for k in settings.get("negations", DEFAULT_NEGATIONS)]
+        bot_id = ctx.config.community.user_id or ""
+        for comment in issue.get("comments") or []:
+            author = (comment.get("author") or {})
+            author_id = author.get("id") or ""
+            if author_id and author_id == bot_id:
+                continue
+            text = (comment.get("body") or "").lower()
+            if any(kw in text for kw in keywords) and not any(
+                ng in text for ng in negations
+            ):
+                return True
+        return False
+
+    async def _remind(self, ctx: ScanContext, issue_id: str, repo: str, pr_number: int) -> None:
+        body = (
+            f"Deploy approval received, but PR {repo}#{pr_number} is not merged "
+            "into main yet — merge it and the deploy will run automatically."
+        )
+        try:
+            await ctx.client.gql(ADD_COMMENT, {"id": issue_id, "body": body})
+        except Exception as exc:  # noqa: BLE001
+            ctx.logger.warning("deploy reminder failed for %s: %s", issue_id, exc)
 
     async def _run_deploy(self, ctx: ScanContext) -> tuple[bool, str]:
         settings = self._settings(ctx)

@@ -36,7 +36,7 @@ class StubQueue:
         self.updated.append((task_id, dict(patches)))
 
 
-def _ctx(queue: StubQueue) -> ScanContext:
+def _ctx(queue: StubQueue | None = None) -> ScanContext:
     config = load_config(profile="community")
     config.module_settings["deployer"] = {
         "ssh_host": "host",
@@ -48,7 +48,7 @@ def _ctx(queue: StubQueue) -> ScanContext:
     return ScanContext(
         config=config,
         client=AsyncMock(),
-        queue=queue,  # type: ignore[arg-type]
+        queue=queue or StubQueue([]),  # type: ignore[arg-type]
         repo=None,  # type: ignore[arg-type]
         logger=logging.getLogger("test"),
     )
@@ -60,6 +60,7 @@ def _module() -> DeployerModule:
     module._approved = AsyncMock(return_value=True)
     module._run_deploy = AsyncMock(return_value=(True, "abc1234"))
     module._after = AsyncMock()
+    module._remind = AsyncMock()
     return module
 
 
@@ -89,6 +90,34 @@ async def test_scan_skips_when_not_approved():
     module._run_deploy.assert_not_awaited()
 
 
+async def test_scan_reminds_once_when_approved_but_not_merged():
+    module = _module()
+    module._pr_merged = AsyncMock(return_value=False)
+    queue = StubQueue([_task(result={"pr_number": 9, "repo": "civilization-luch/tribe"})])
+    assert await module._scan(_ctx(queue)) == 0
+    module._remind.assert_awaited_once()
+    assert queue.updated == [(7, {"reminded": True})]
+
+
+async def test_scan_does_not_remind_twice():
+    module = _module()
+    module._pr_merged = AsyncMock(return_value=False)
+    queue = StubQueue(
+        [
+            _task(
+                result={
+                    "pr_number": 9,
+                    "repo": "civilization-luch/tribe",
+                    "reminded": True,
+                }
+            )
+        ]
+    )
+    assert await module._scan(_ctx(queue)) == 0
+    module._remind.assert_not_awaited()
+    assert queue.updated == []
+
+
 async def test_scan_skips_when_already_deployed():
     module = _module()
     queue = StubQueue(
@@ -111,20 +140,24 @@ async def test_scan_skips_when_no_pr_number():
     assert await module._scan(_ctx(queue)) == 0
 
 
-async def test_approved_requires_open_status_and_label():
+def _issue(
+    status: str = "open", labels: list[str] | None = None, comments: list[dict] | None = None
+) -> dict:
+    return {"id": "i1", "status": status, "labels": labels or [], "comments": comments or []}
+
+
+async def _approved(issue: dict, keywords_override: list[str] | None = None) -> bool:
     module = DeployerModule()
     config = load_config(profile="community")
-    config.community.communities = ["platform"]
+    config.community.user_id = "BOT"
+    if keywords_override:
+        config.module_settings["deployer"] = {"keywords": keywords_override}
     client = AsyncMock()
 
     async def gql(query: str, variables: dict):
-        labels = variables.get("id") == "approved"
-        status = "closed" if variables.get("id") == "closed" else "open"
-        labels_ = ["deploy:approved"] if labels else []
-        return {"issue": {"id": variables["id"], "status": status, "labels": labels_}}
+        return {"issue": issue}
 
     client.gql = gql
-
     ctx = ScanContext(
         config=config,
         client=client,  # type: ignore[arg-type]
@@ -132,9 +165,54 @@ async def test_approved_requires_open_status_and_label():
         repo=None,  # type: ignore[arg-type]
         logger=logging.getLogger("test"),
     )
-    assert await module._approved(ctx, "approved") is True
-    assert await module._approved(ctx, "no-label") is False
-    assert await module._approved(ctx, "closed") is False
+    return await module._approved(ctx, "i1")
+
+
+async def test_approved_by_label():
+    assert await _approved(_issue(labels=["deploy:approved"])) is True
+
+
+async def test_approved_by_human_freeform_comment():
+    human = [{"id": "c1", "author": {"id": "HUMAN"}, "body": "задеплой"}]
+    assert await _approved(_issue(comments=human)) is True
+
+
+async def test_approved_by_human_freeform_variants():
+    human = [{"id": "c1", "author": {"id": "HUMAN"}, "body": "деплой, ок"}]
+    assert await _approved(_issue(comments=human)) is True
+    human = [{"id": "c1", "author": {"id": "HUMAN"}, "body": "deploy it now"}]
+    assert await _approved(_issue(comments=human)) is True
+    human = [{"id": "c1", "author": {"id": "HUMAN"}, "body": "покати на прод"}]
+    assert await _approved(_issue(comments=human)) is True
+
+
+async def test_approved_rejects_negation():
+    human = [{"id": "c1", "author": {"id": "HUMAN"}, "body": "не деплой"}]
+    assert await _approved(_issue(comments=human)) is False
+    human = [{"id": "c1", "author": {"id": "HUMAN"}, "body": "отмена деплоя"}]
+    assert await _approved(_issue(comments=human)) is False
+
+
+async def test_approved_ignores_bot_comment():
+    bot = [{"id": "c1", "author": {"id": "BOT"}, "body": "деплой"}]
+    assert await _approved(_issue(comments=bot)) is False
+
+
+async def test_approved_no_marker_comment():
+    human = [{"id": "c1", "author": {"id": "HUMAN"}, "body": "спасибо"}]
+    assert await _approved(_issue(comments=human)) is False
+
+
+async def test_approved_closed_issue_rejected():
+    human = [{"id": "c1", "author": {"id": "HUMAN"}, "body": "деплой"}]
+    assert await _approved(_issue(status="closed", comments=human)) is False
+
+
+async def test_approved_uses_configured_keywords():
+    human = [{"id": "c1", "author": {"id": "HUMAN"}, "body": "деплой"}]
+    assert await _approved(_issue(comments=human), keywords_override=["погнали"]) is False
+    human = [{"id": "c2", "author": {"id": "HUMAN"}, "body": "погнали"}]
+    assert await _approved(_issue(comments=human), keywords_override=["погнали"]) is True
 
 
 async def test_run_deploy_returns_false_when_key_missing():
