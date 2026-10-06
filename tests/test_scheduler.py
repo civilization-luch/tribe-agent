@@ -4,6 +4,7 @@ import asyncio
 import logging
 from pathlib import Path
 
+import tribe_agent.core.scheduler as scheduler_mod
 from tribe_agent.core.config import load_config
 from tribe_agent.core.module import ScanContext, TaskSpec
 from tribe_agent.core.queue import Task
@@ -253,3 +254,81 @@ async def test_execute_runtime_failure_marks_failed_and_skips_push():
     queue = await _execute(config, [item], FakeRuntime(ok=False), repo, client)
     assert queue.failed and not queue.completed
     assert repo.pushes == []
+
+
+async def test_execute_branch_mode_opens_pr(monkeypatch):
+    calls: dict = {}
+
+    async def fake_open_pr(url, head, base, title, body, token):
+        calls.update(url=url, head=head, base=base, token=token)
+        return "https://github.com/o/r/pull/9"
+
+    monkeypatch.setattr(scheduler_mod, "open_pull_request", fake_open_pr)
+    config = load_config(profile="community")
+    config.module_settings["executor"] = {
+        "push": True, "push_mode": "branch", "open_pr": True,
+    }
+    config.repo.git_token = "tok"
+    repo = StubRepo()
+    client = FakeClient()
+    item = _item(
+        {"issue_id": "i1", "workspace_id": "w1", "branch": "main",
+         "repo_url": "https://github.com/o/r", "title": "Fix it"},
+        repo_path="/tmp/clone",
+    )
+    queue = await _execute(config, [item], FakeRuntime(), repo, client)
+    assert calls["url"] == "https://github.com/o/r"
+    assert calls["token"] == "tok"
+    assert calls["base"] == "main"
+    assert repo.checkouts[0][1] == calls["head"]
+    assert "PR: https://github.com/o/r/pull/9" in client.messages[0]["body"]
+    assert not queue.failed
+
+
+async def test_execute_branch_mode_skips_pr_without_token(monkeypatch):
+    called = []
+
+    async def fake_open_pr(*args, **kwargs):
+        called.append(args)
+        return ""
+
+    monkeypatch.setattr(scheduler_mod, "open_pull_request", fake_open_pr)
+    config = load_config(profile="community")
+    config.module_settings["executor"] = {
+        "push": True, "push_mode": "branch", "open_pr": True,
+    }
+    config.repo.git_token = ""
+    repo = StubRepo()
+    client = FakeClient()
+    item = _item(
+        {"issue_id": "i1", "workspace_id": "w1", "branch": "main",
+         "repo_url": "https://github.com/o/r", "title": "Fix it"},
+        repo_path="/tmp/clone",
+    )
+    queue = await _execute(config, [item], FakeRuntime(), repo, client)
+    assert called == []
+    assert client.messages and "PR:" not in client.messages[0]["body"]
+    assert not queue.failed
+
+
+async def test_execute_open_pr_requires_branch_mode(monkeypatch):
+    called = []
+
+    async def fake_open_pr(*args, **kwargs):
+        called.append(args)
+        return ""
+
+    monkeypatch.setattr(scheduler_mod, "open_pull_request", fake_open_pr)
+    config = load_config(profile="community")
+    config.module_settings["executor"] = {"push": True, "open_pr": True}
+    repo = StubRepo()
+    client = FakeClient()
+    item = _item(
+        {"issue_id": "i1", "workspace_id": "w1", "branch": "main",
+         "repo_url": "https://github.com/o/r"},
+        repo_path="/tmp/clone",
+    )
+    queue = await _execute(config, [item], FakeRuntime(), repo, client)
+    assert called == []
+    assert repo.pushes == [("/tmp/clone", "main")]
+    assert not queue.failed

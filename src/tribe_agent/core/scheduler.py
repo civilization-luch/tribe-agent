@@ -9,6 +9,7 @@ from pathlib import Path
 
 from tribe_agent.core.client.graphql import GraphQLClient
 from tribe_agent.core.config import AppConfig
+from tribe_agent.core.git_host import open_pull_request
 from tribe_agent.core.module import Module, ScanContext, Scanner, TaskSpec
 from tribe_agent.core.presence import presence_loop
 from tribe_agent.core.queue import Task, TaskQueue
@@ -208,7 +209,9 @@ class Runner:
         push_enabled = bool(executor_settings.get("push"))
         push_mode = executor_settings.get("push_mode", "direct")
         branch_prefix = executor_settings.get("branch_prefix", "tribe")
+        open_pr = bool(executor_settings.get("open_pr"))
         push_target = ""
+        base_branch = ""
         if push_enabled and items and items[0].repo_path:
             payload = items[0].payload
             base_branch = payload.get("branch", "") or ctx.repo.stored_branch(directory)
@@ -219,6 +222,8 @@ class Runner:
                 await ctx.repo.checkout_branch(directory, push_target, base_branch)
             else:
                 push_target = base_branch or ctx.repo.head_branch(directory)
+            if open_pr and push_mode != "branch":
+                ctx.logger.warning("open_pr requires push_mode: branch, skipping PR")
 
         async with sem:
             try:
@@ -228,10 +233,13 @@ class Runner:
             except Exception as exc:  # noqa: BLE001
                 result = RunResult(exit_code=1, stderr=str(exc), status="error")
         if result.ok:
+            pr_url = ""
             if push_enabled and push_target:
                 try:
                     await ctx.repo.push(directory, push_target)
-                    await self._comment_pushed(ctx, items, push_target)
+                    if open_pr and push_mode == "branch":
+                        pr_url = await self._open_pr(ctx, items, push_target, base_branch)
+                    await self._comment_pushed(ctx, items, push_target, pr_url)
                 except Exception as exc:  # noqa: BLE001
                     ctx.logger.warning("push failed for %s: %s", directory, exc)
             for task in items:
@@ -245,9 +253,14 @@ class Runner:
                 await ctx.queue.fail(task.id, error)
             logger.warning("%s: FAIL %d task(s) (%s)", spec.task_type, len(items), error[:160])
 
-    async def _comment_pushed(self, ctx: ScanContext, items: list[Task], target: str) -> None:
+    async def _comment_pushed(
+        self, ctx: ScanContext, items: list[Task], target: str, pr_url: str = ""
+    ) -> None:
         if not ctx.config.module_config("executor").get("push_comment", True):
             return
+        body = f"Pushed commit(s) to `{target}`."
+        if pr_url:
+            body = f"{body}\nPR: {pr_url}"
         for task in items:
             issue_id = task.payload.get("issue_id")
             if not issue_id:
@@ -256,7 +269,31 @@ class Runner:
                 await ctx.client.gql(
                     "mutation($parentId:String!,$body:String!){"
                     " createComment(parentId:$parentId, body:$body){ id } }",
-                    {"parentId": issue_id, "body": f"Pushed commit(s) to `{target}`."},
+                    {"parentId": issue_id, "body": body},
                 )
             except Exception as exc:  # noqa: BLE001
                 ctx.logger.warning("push comment failed for issue %s: %s", issue_id, exc)
+
+    async def _open_pr(
+        self, ctx: ScanContext, items: list[Task], head: str, base: str
+    ) -> str:
+        payload = items[0].payload
+        repo_url = payload.get("repo_url", "")
+        token = ctx.config.repo.git_token
+        if not repo_url:
+            return ""
+        if not token:
+            ctx.logger.warning("open_pr set but no repo.git_token, skipping PR")
+            return ""
+        try:
+            return await open_pull_request(
+                url=repo_url,
+                head=head,
+                base=base or "main",
+                title=payload.get("title", "") or "Automated change",
+                body=f"Implements issue {payload.get('issue_id', '')}.",
+                token=token,
+            )
+        except Exception as exc:  # noqa: BLE001
+            ctx.logger.warning("open PR failed: %s", exc)
+            return ""

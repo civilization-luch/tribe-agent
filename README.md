@@ -87,6 +87,7 @@ module_settings:
     push: true            # push after a successful opencode run
     push_mode: direct     # direct | branch
     branch_prefix: tribe
+    open_pr: false        # open a GitHub PR (branch mode only)
     push_comment: true
 ```
 
@@ -94,6 +95,9 @@ module_settings:
   (the `metadata.repository.branch`, or the clone's current branch).
 - `push_mode: branch` creates a feature branch
   (`<branch_prefix>/<workspace>/i<issue>`), runs the work there and pushes it.
+- `open_pr: true` opens a GitHub pull request after a branch push — the
+  repository URL must be `github.com` and `repo.git_token` must have
+  `pull_requests: write` scope.
 - HTTPS remotes authenticate with `repo.git_token` (already embedded in the
   clone's `origin`); local/file remotes need nothing; SSH remotes are not
   supported yet.
