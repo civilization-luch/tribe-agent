@@ -64,6 +64,8 @@ module_settings:
   announcements:
     frequency: weekly
     telegram_chat_id: ""
+    workspaces: []        # workspace ids to announce feature commits from
+                          # (empty: repo.default_url, else project_path)
   executor:
     push: false            # push executor commits to the workspace repository
     push_mode: direct      # direct (push to the bound branch) | branch (feature branch)
