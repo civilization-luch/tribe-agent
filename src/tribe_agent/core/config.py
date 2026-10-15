@@ -19,6 +19,9 @@ ENV_OVERRIDES = {
     "TRIBE_AGENT_API_URL": ("community", "api_url"),
     "TRIBE_AGENT_MCP_URL": ("community", "mcp_url"),
     "TRIBE_AGENT_JWT_SECRET": ("community", "jwt_secret"),
+    "TRIBE_AGENT_AUTH_URL": ("community", "auth_url"),
+    "TRIBE_AGENT_JWKS_URL": ("community", "jwks_url"),
+    "TRIBE_AGENT_AUTH_CLIENT_ID": ("community", "auth_client_id"),
     "TRIBE_AGENT_PROJECT_PATH": ("__root__", "project_path"),
     "TRIBE_AGENT_DATA_DIR": ("__root__", "data_dir"),
     "TRIBE_AGENT_OPENCODE_DB": ("opencode", "db"),
@@ -34,8 +37,11 @@ class CommunityConfig(BaseModel):
     bot_token: str = ""
     user_id: str = ""
     communities: list[str] = Field(default_factory=list)
-    jwt_secret: str = ""
+    jwt_secret: str = ""          # legacy HS256 fallback (until stage 6 cleanup)
     jwt_algorithm: str = "HS256"
+    auth_url: str = ""            # tribe-auth base URL; enables RS256 via JWKS
+    jwks_url: str = ""            # default: {auth_url}/.well-known/jwks.json
+    auth_client_id: str = "tribe"  # expected `aud` of RS256 tokens
 
 
 class RepoConfig(BaseModel):

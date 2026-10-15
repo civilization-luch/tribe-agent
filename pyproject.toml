@@ -14,7 +14,7 @@ dependencies = [
 assistant = [
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.32,<1",
-    "pyjwt>=2.9,<3",
+    "pyjwt[crypto]>=2.9,<3",
 ]
 dev = [
     "pytest>=8.3,<9",

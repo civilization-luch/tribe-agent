@@ -11,6 +11,13 @@ from typing import Any
 
 import httpx
 
+try:  # fastapi is an optional extra (`assistant`); endpoints need the Request
+    # annotation to be resolvable from module globals (PEP 563 string
+    # annotations are evaluated against __globals__, not closure locals).
+    from fastapi import Request
+except ImportError:  # pragma: no cover — make_app re-raises via ImportError
+    Request = None  # type: ignore[assignment]
+
 from tribe_agent.core.config import AppConfig
 from tribe_agent.core.module import Module
 
@@ -113,26 +120,56 @@ async def _read_sse(resp: httpx.Response, queue: asyncio.Queue[dict[str, Any]]) 
 
 def make_app(config: AppConfig):
     import jwt
-    from fastapi import FastAPI, Request
+    from fastapi import FastAPI
     from fastapi.responses import JSONResponse, StreamingResponse
 
     settings = config.module_config("assistant")
+    community = config.community
     client = OpencodeClient(config.opencode.url, config.opencode.password)
     rate: dict[str, list[float]] = {}
     rate_limit = int(settings.get("rate_limit", 30))
     timeout = float(settings.get("timeout", 180))
 
+    jwks_provider = None
+    jwks_url = community.jwks_url or (
+        f"{community.auth_url}/.well-known/jwks.json" if community.auth_url else ""
+    )
+    if jwks_url:
+        from tribe_agent.core.jwks import JwksProvider
+
+        jwks_provider = JwksProvider(jwks_url)
+
     app = FastAPI(title="Tribe Assistant")
 
-    def extract_user_id(request: Request) -> str | None:
+    async def extract_user_id(request: Request) -> str | None:
         auth = request.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
             return None
+        token = auth[7:]
+        try:
+            header = jwt.get_unverified_header(token)
+        except jwt.PyJWTError:
+            return None
+        alg = header.get("alg", "")
+        if alg == "RS256":
+            # tokens issued by the tribe-auth service; aud checked by us
+            if jwks_provider is None:
+                return None
+            key = await jwks_provider.get_signing_key(header.get("kid"))
+            if key is None:
+                return None
+        elif alg == community.jwt_algorithm and community.jwt_secret:
+            key = community.jwt_secret
+        else:
+            return None
         try:
             payload = jwt.decode(
-                auth[7:], config.community.jwt_secret, algorithms=[config.community.jwt_algorithm]
+                token, key, algorithms=[alg], options={"verify_aud": False}
             )
         except jwt.PyJWTError:
+            return None
+        aud = payload.get("aud")
+        if aud is not None and aud != community.auth_client_id:
             return None
         if payload.get("type") != "access":
             return None
@@ -154,8 +191,8 @@ def make_app(config: AppConfig):
         result.setdefault("feedbackCommunityId", settings.get("feedback_community_id", ""))
         return result
 
-    def guard(request: Request):
-        user_id = extract_user_id(request)
+    async def guard(request: Request):
+        user_id = await extract_user_id(request)
         if not user_id:
             return None, JSONResponse({"error": "Unauthorized"}, status_code=401)
         if not check_rate(user_id):
@@ -164,7 +201,7 @@ def make_app(config: AppConfig):
 
     @app.post("/assistant/session")
     async def session(request: Request) -> JSONResponse:
-        _, error = guard(request)
+        _, error = await guard(request)
         if error:
             return error
         try:
@@ -175,7 +212,7 @@ def make_app(config: AppConfig):
 
     @app.post("/assistant/message")
     async def message(request: Request) -> JSONResponse:
-        user_id, error = guard(request)
+        user_id, error = await guard(request)
         if error:
             return error
         body = await request.json()
@@ -199,7 +236,7 @@ def make_app(config: AppConfig):
 
     @app.post("/assistant/stream", response_model=None)
     async def stream(request: Request):
-        user_id, error = guard(request)
+        user_id, error = await guard(request)
         if error:
             return error
         body = await request.json()
@@ -226,7 +263,7 @@ def make_app(config: AppConfig):
 
     @app.post("/assistant/reset")
     async def reset(request: Request) -> JSONResponse:
-        _, error = guard(request)
+        _, error = await guard(request)
         if error:
             return error
         body = await request.json()
