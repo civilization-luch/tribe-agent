@@ -105,7 +105,7 @@ class AnnouncementsModule(Module):
             url, branch = await self._resolve_repo(ctx, ws_id, cache)
             if url:
                 try:
-                    path = await ctx.repo.ensure(ws_id, url, branch)
+                    path = await ctx.repo.ensure(url, branch)
                     sights.append((ws_id, path))
                 except Exception as exc:  # noqa: BLE001
                     ctx.logger.warning("announcements repo failed for %s: %s", ws_id, exc)
@@ -115,7 +115,7 @@ class AnnouncementsModule(Module):
             return sights
         if ctx.config.repo.default_url:
             try:
-                path = await ctx.repo.ensure("", ctx.config.repo.default_url, ctx.config.repo.default_branch or "")
+                path = await ctx.repo.ensure(ctx.config.repo.default_url, ctx.config.repo.default_branch or "")
                 return [("default", path)]
             except Exception as exc:  # noqa: BLE001
                 ctx.logger.warning("announcements default repo failed: %s", exc)

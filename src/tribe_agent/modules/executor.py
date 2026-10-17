@@ -8,6 +8,7 @@ from tribe_agent.core.client.graphql import WORKSPACE_REPO
 from tribe_agent.core.config import AppConfig
 from tribe_agent.core.module import Module, ScanContext, Scanner, TaskSpec
 from tribe_agent.core.queue import Task
+from tribe_agent.core.repo import resolve_base_branch
 
 LIST_ASSIGNED = """
 query($assigneeId: String!) {
@@ -93,6 +94,7 @@ class ExecutorModule(Module):
             issues = [i for i in issues if (i.get("communityId") or "") in communities]
         enqueued = 0
         cache: dict[str, tuple[str, str]] = {}
+        warned: set[str] = set()
         for issue in issues:
             issue_id = issue.get("id", "")
             if not issue_id:
@@ -104,10 +106,17 @@ class ExecutorModule(Module):
             if not url and ctx.config.repo.default_url:
                 url = ctx.config.repo.default_url
                 branch = ctx.config.repo.default_branch or branch
+            if not branch and workspace_id not in warned:
+                warned.add(workspace_id)
+                ctx.logger.warning(
+                    "workspace %s has no repoBranch, base branch falls back to %r",
+                    workspace_id or "?",
+                    resolve_base_branch("", ctx.config.repo.default_branch),
+                )
             repo_path = ""
             if url:
                 try:
-                    path = await ctx.repo.ensure(workspace_id, url, branch)
+                    path = await ctx.repo.ensure(url, branch)
                     repo_path = str(path)
                 except Exception as exc:  # noqa: BLE001
                     ctx.logger.warning("repo resolve failed for %s: %s", workspace_id, exc)

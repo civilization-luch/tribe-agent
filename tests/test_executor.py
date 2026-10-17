@@ -40,8 +40,8 @@ class FakeRepo:
     def __init__(self) -> None:
         self.ensure_calls: list[tuple] = []
 
-    async def ensure(self, workspace_id: str, url: str, branch: str = "") -> Path:
-        self.ensure_calls.append((workspace_id, url, branch))
+    async def ensure(self, url: str, branch: str = "") -> Path:
+        self.ensure_calls.append((url, branch))
         return Path("/tmp/repo")
 
 
@@ -73,7 +73,7 @@ async def test_executor_uses_workspace_repo_from_graphql(tmp_path: Path):
         tmp_path, {"id": "w1", "repoUrl": "https://github.com/o/r", "repoBranch": "dev"}
     )
     assert count == 1
-    assert repo.ensure_calls == [("w1", "https://github.com/o/r", "dev")]
+    assert repo.ensure_calls == [("https://github.com/o/r", "dev")]
     assert tasks[0].repo_path == "/tmp/repo"
 
 
@@ -84,7 +84,7 @@ async def test_executor_local_override_wins(tmp_path: Path):
         module_settings={"executor": {"repos": {"w1": {"url": "https://override/r", "branch": "x"}}}},
     )
     assert count == 1
-    assert repo.ensure_calls == [("w1", "https://override/r", "x")]
+    assert repo.ensure_calls == [("https://override/r", "x")]
     assert client.workspace_queries == 0
 
 
@@ -163,7 +163,7 @@ async def test_executor_uses_default_repo_when_workspace_unbound(tmp_path: Path)
     tasks = await queue.dequeue_batch("execute", 10)
     await queue.close()
     assert count == 1
-    assert repo.ensure_calls == [("w1", "https://default.example/r", "dev")]
+    assert repo.ensure_calls == [("https://default.example/r", "dev")]
     assert tasks[0].repo_path == "/tmp/repo"
     assert tasks[0].payload["branch"] == "dev"
     assert tasks[0].payload["repo_url"] == "https://default.example/r"
@@ -188,4 +188,4 @@ async def test_executor_workspace_repo_wins_over_default(tmp_path: Path):
     count = await ExecutorModule()._scan(ctx)
     await queue.close()
     assert count == 1
-    assert repo.ensure_calls == [("w1", "https://w.example/r", "main")]
+    assert repo.ensure_calls == [("https://w.example/r", "main")]

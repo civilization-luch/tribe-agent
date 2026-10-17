@@ -14,7 +14,7 @@ from tribe_agent.core.git_host import open_pull_request
 from tribe_agent.core.module import Module, ScanContext, Scanner, TaskSpec
 from tribe_agent.core.presence import presence_loop
 from tribe_agent.core.queue import Task, TaskQueue
-from tribe_agent.core.repo import RepoManager
+from tribe_agent.core.repo import RepoManager, resolve_base_branch
 from tribe_agent.core.runtime.base import CodingRuntime, RunResult
 from tribe_agent.core.runtime.codex import CodexRuntime
 from tribe_agent.core.runtime.opencode import OpencodeRuntime
@@ -222,35 +222,34 @@ class Runner:
         push_target = ""
         base_branch = ""
         base_sha = ""
-        if push_enabled and items and items[0].repo_path:
-            payload = items[0].payload
-            if push_mode == "branch":
-                workspace_id = payload.get("workspace_id", "")
-                issue_id = payload.get("issue_id", "")
-                base_branch = (
-                    payload.get("branch", "")
-                    or ctx.config.repo.default_branch
-                    or "main"
-                )
-                push_target = f"{branch_prefix}/{workspace_id[:8]}-i{issue_id[:8]}"
-                await ctx.repo.create_branch_from(directory, push_target, base_branch)
-            else:
-                base_branch = payload.get("branch", "") or ctx.repo.stored_branch(directory)
-                push_target = base_branch or ctx.repo.head_branch(directory)
-            base_sha = ctx.repo.head_sha(directory)
-            if open_pr and push_mode != "branch":
-                ctx.logger.warning("open_pr requires push_mode: branch, skipping PR")
+        pr_url = ""
+        async with ctx.repo.lock_for(directory):
+            if push_enabled and items and items[0].repo_path:
+                payload = items[0].payload
+                if push_mode == "branch":
+                    workspace_id = payload.get("workspace_id", "")
+                    issue_id = payload.get("issue_id", "")
+                    base_branch = resolve_base_branch(
+                        payload.get("branch", ""), ctx.config.repo.default_branch
+                    )
+                    push_target = f"{branch_prefix}/{workspace_id[:8]}-i{issue_id[:8]}"
+                    await ctx.repo.create_branch_from(directory, push_target, base_branch)
+                else:
+                    base_branch = payload.get("branch", "") or ctx.repo.stored_branch(directory)
+                    push_target = base_branch or ctx.repo.head_branch(directory)
+                base_sha = ctx.repo.head_sha(directory)
+                if open_pr and push_mode != "branch":
+                    ctx.logger.warning("open_pr requires push_mode: branch, skipping PR")
 
-        async with sem:
-            try:
-                result = await runtime.run(
-                    title=title, prompt=prompt, directory=directory, agent=spec.agent
-                )
-            except Exception as exc:  # noqa: BLE001
-                result = RunResult(exit_code=1, stderr=str(exc), status="error")
-        if result.ok:
-            pr_url = ""
-            if push_enabled and push_target:
+            async with sem:
+                try:
+                    result = await runtime.run(
+                        title=title, prompt=prompt, directory=directory, agent=spec.agent
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    result = RunResult(exit_code=1, stderr=str(exc), status="error")
+
+            if result.ok and push_enabled and push_target:
                 head_sha = ctx.repo.head_sha(directory)
                 if head_sha and head_sha == base_sha:
                     ctx.logger.info("no changes in %s, skipping push/PR", directory)
@@ -262,6 +261,8 @@ class Runner:
                         await self._comment_pushed(ctx, items, push_target, pr_url)
                     except Exception as exc:  # noqa: BLE001
                         ctx.logger.warning("push failed for %s: %s", directory, exc)
+
+        if result.ok:
             if pr_url:
                 await self._keep_issue_open(ctx, items)
             result_data = {"session_id": result.session_id}

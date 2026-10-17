@@ -72,6 +72,10 @@ class StubRepo:
         self._fail_push = fail_push
         self._no_changes = no_changes
         self._sha_calls = 0
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    def lock_for(self, path: Path) -> asyncio.Lock:
+        return self._locks.setdefault(str(path), asyncio.Lock())
 
     async def checkout_branch(self, path: Path, name: str, base: str = "") -> None:
         self.checkouts.append((str(path), name, base))
@@ -197,6 +201,69 @@ async def _execute(config, items: list[Task], runtime, repo, client) -> DrainQue
         ctx, runtime, _spec(), items, items[0].repo_path or "/tmp/nonrepo", asyncio.Semaphore(1)
     )
     return queue
+
+
+async def test_same_directory_tasks_do_not_interleave():
+    config = load_config(profile="community")
+    config.module_settings["executor"] = {"push": True, "push_mode": "branch"}
+    events: list[str] = []
+
+    class TracingRepo(StubRepo):
+        def head_sha(self, path: Path) -> str:
+            self._sha_calls += 1
+            return f"sha{self._sha_calls}"
+
+        async def create_branch_from(self, path: Path, name: str, base: str) -> None:
+            events.append(f"{name}:prep")
+            await asyncio.sleep(0.02)
+            await super().create_branch_from(path, name, base)
+
+        async def push(self, path: Path, target: str) -> None:
+            events.append(f"{target}:push")
+            await super().push(path, target)
+
+    class TracingRuntime(FakeRuntime):
+        def __init__(self, tag: str) -> None:
+            super().__init__()
+            self._tag = tag
+
+        async def run(self, *, title: str, prompt: str, directory: Path, agent: str) -> RunResult:
+            events.append(f"{self._tag}:run")
+            await asyncio.sleep(0.02)
+            return await super().run(
+                title=title, prompt=prompt, directory=directory, agent=agent
+            )
+
+    runner = Runner(config, [])
+    queue = DrainQueue()
+    ctx = ScanContext(
+        config=config,
+        client=FakeClient(),  # type: ignore[arg-type]
+        queue=queue,  # type: ignore[arg-type]
+        repo=TracingRepo(),  # type: ignore[arg-type]
+        logger=logging.getLogger("test"),
+    )
+    pairs = [
+        (_item({"issue_id": "i1", "workspace_id": "w1", "branch": "main"}, repo_path="/tmp/clone"),
+         TracingRuntime("tribe/w1-ii1")),
+        (_item({"issue_id": "i2", "workspace_id": "w1", "branch": "main"}, repo_path="/tmp/clone"),
+         TracingRuntime("tribe/w1-ii2")),
+    ]
+    await asyncio.gather(
+        *(
+            runner._execute(  # type: ignore[arg-type]
+                ctx, runtime, _spec(), [item], "/tmp/clone", asyncio.Semaphore(2)
+            )
+            for item, runtime in pairs
+        )
+    )
+    tags = [event.split(":")[0] for event in events]
+    transitions = sum(
+        1 for index in range(1, len(tags)) if tags[index] != tags[index - 1]
+    )
+    assert sorted(tags) == sorted(["tribe/w1-ii1"] * 3 + ["tribe/w1-ii2"] * 3)
+    assert transitions == 1, f"tasks interleaved in one checkout: {events}"
+    assert not queue.failed
 
 
 async def test_execute_direct_push_pushes_to_bound_branch():

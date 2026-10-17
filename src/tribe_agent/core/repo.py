@@ -1,8 +1,9 @@
-"""Repository manager — shallow, lazy clones plus per-workspace locking."""
+"""Repository manager — shallow, lazy clones plus per-repository locking."""
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
 import subprocess
 import time
@@ -10,11 +11,34 @@ from pathlib import Path
 
 from tribe_agent.core.config import AppConfig
 
+FALLBACK_BASE_BRANCH = "main"
+
+
+def resolve_base_branch(platform_branch: str, configured_branch: str) -> str:
+    """Platform binding wins, then configuration, then `main`.
+
+    The order matters: a task whose base branch is silently wrong lands its
+    commits on somebody else's branch, so every caller must agree on it.
+    """
+    return platform_branch or configured_branch or FALLBACK_BASE_BRANCH
+
 
 def _slug(url: str) -> str:
-    tail = url.rstrip("/").rsplit("/", 1)[-1]
-    tail = re.sub(r"\.git$", "", tail)
-    return re.sub(r"[^A-Za-z0-9_.-]", "-", tail) or "repo"
+    cleaned = re.sub(r"^[A-Za-z][A-Za-z0-9+.-]*://", "", url)
+    cleaned = re.sub(r"^[^/@]+@", "", cleaned)
+    cleaned = re.sub(r"\.git$", "", cleaned.rstrip("/"))
+    slug = re.sub(r"[^A-Za-z0-9_.-]", "-", cleaned).strip("-")
+    if len(slug) > 80:
+        digest = hashlib.sha1(cleaned.encode()).hexdigest()[:10]
+        tail = cleaned.rsplit("/", 1)[-1]
+        slug = re.sub(r"[^A-Za-z0-9_.-]", "-", f"{tail}-{digest}")
+    return slug or "repo"
+
+
+def auth_url(url: str, token: str) -> str:
+    if token and url.startswith("https://") and "@" not in url:
+        return url.replace("https://", f"https://x-access-token:{token}@", 1)
+    return url
 
 
 class RepoManager:
@@ -30,23 +54,29 @@ class RepoManager:
     def _lock(self, key: str) -> asyncio.Lock:
         return self._locks.setdefault(key, asyncio.Lock())
 
-    def path_for(self, workspace_id: str) -> Path:
-        return self.root / (workspace_id or "default")
+    def lock_for(self, target: str | Path) -> asyncio.Lock:
+        """Lock the working tree at `target` for the whole task, not just the clone.
+
+        Branch preparation, the agent run and the push all mutate the same
+        checkout; holding only one of them lets two tasks reset each other's
+        HEAD mid-run.
+        """
+        return self._lock(str(Path(target).expanduser()))
+
+    def path_for(self, url: str) -> Path:
+        return self.root / _slug(url)
 
     def _auth_url(self, url: str) -> str:
-        token = self.config.repo.git_token
-        if token and url.startswith("https://") and "@" not in url:
-            return url.replace("https://", f"https://x-access-token:{token}@", 1)
-        return url
+        return auth_url(url, self.config.repo.git_token)
 
-    async def ensure(self, workspace_id: str, url: str, branch: str = "") -> Path:
+    async def ensure(self, url: str, branch: str = "") -> Path:
         if not url:
             if self.config.project_path:
                 return Path(self.config.project_path).expanduser().resolve()
             raise ValueError("No repository bound to workspace and no project_path configured")
 
-        path = self.path_for(workspace_id or _slug(url))
-        async with self._lock(path.name):
+        path = self.path_for(url)
+        async with self.lock_for(path):
             if not (path / ".git").is_dir():
                 await self._clone(url, branch, path)
                 self._last_fetch[str(path)] = time.monotonic()

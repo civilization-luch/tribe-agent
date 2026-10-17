@@ -116,6 +116,27 @@ def _token_expiry(token: str) -> datetime | None:
     return datetime.fromtimestamp(exp, tz=UTC) if exp else None
 
 
+def _remote_branch_state(config, url: str, branch: str) -> tuple[bool, str]:
+    import os
+    import subprocess
+
+    from tribe_agent.core.repo import auth_url
+
+    proc = subprocess.run(
+        ["git", "ls-remote", "--heads", auth_url(url, config.repo.git_token), branch],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+    )
+    if proc.returncode != 0:
+        return False, (proc.stderr.strip()[:160] or "git ls-remote failed")
+    if not proc.stdout.strip():
+        return False, f"`{branch}` not found on {url}"
+    return True, ""
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     config = _resolve_config(args)
     ok = True
@@ -166,6 +187,19 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         or bool(config.repo.default_url),
         "set project_path, repo.default_url or executor.repos",
     )
+
+    from tribe_agent.core.repo import FALLBACK_BASE_BRANCH, resolve_base_branch
+
+    base_branch = resolve_base_branch("", config.repo.default_branch)
+    check(
+        "base branch pinned in config",
+        bool(config.repo.default_branch),
+        "repo.default_branch is empty — a workspace with no repoBranch lands on "
+        f"`{FALLBACK_BASE_BRANCH}`, and the run only shows it in a log warning",
+    )
+    if config.repo.default_url:
+        found, detail = _remote_branch_state(config, config.repo.default_url, base_branch)
+        check(f"base branch `{base_branch}` on default remote", found, detail)
 
     auth_url = config.community.auth_url
     jwks_url = config.community.jwks_url or (
