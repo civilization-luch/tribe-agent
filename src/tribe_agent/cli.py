@@ -8,9 +8,12 @@ import logging
 import shutil
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 from tribe_agent.core.config import load_config
+
+TOKEN_EXPIRY_WARNING_DAYS = 30
 
 INIT_TEMPLATE = """\
 profile: community
@@ -102,6 +105,20 @@ def cmd_run_queue(args: argparse.Namespace) -> int:
     return 0
 
 
+def _token_expiry(token: str) -> datetime | None:
+    """Read ``exp`` from a JWT without verifying it (diagnostics only)."""
+    try:
+        import jwt
+    except ImportError:  # pragma: no cover — pyjwt is an optional extra
+        return None
+    try:
+        payload = jwt.decode(token, options={"verify_signature": False})
+    except Exception:  # noqa: BLE001 — malformed/expired token
+        return None
+    exp = payload.get("exp")
+    return datetime.fromtimestamp(exp, tz=UTC) if exp else None
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     config = _resolve_config(args)
     ok = True
@@ -131,17 +148,72 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         "set project_path, repo.default_url or executor.repos",
     )
 
-    if config.community.api_url and config.community.bot_token:
+    auth_url = config.community.auth_url
+    jwks_url = config.community.jwks_url or (
+        f"{auth_url}/.well-known/jwks.json" if auth_url else ""
+    )
+    check(
+        "auth service configured (RS256 via JWKS)",
+        bool(jwks_url),
+        "set community.auth_url — tribe-auth issues the bot token",
+    )
+
+    if config.community.bot_token:
+        exp = _token_expiry(config.community.bot_token)
+        if exp is None:
+            check("bot_token decodes as JWT", False, "token is malformed or pyjwt is missing")
+        else:
+            days = (exp - datetime.now(UTC)).days
+            check(
+                f"bot_token valid for {days} more day(s) (exp {exp:%Y-%m-%d})",
+                days >= TOKEN_EXPIRY_WARNING_DAYS,
+                "mint a new service-account token in tribe-auth",
+            )
+
+    if jwks_url:
         import httpx
 
         try:
+            resp = httpx.get(jwks_url, timeout=10)
+            keys = resp.json().get("keys", []) if resp.status_code == 200 else []
+            check(f"jwks reachable ({resp.status_code}, {len(keys)} key(s))", bool(keys), jwks_url)
+        except Exception as exc:  # noqa: BLE001
+            check("jwks reachable", False, str(exc))
+
+    if config.community.api_url and config.community.bot_token:
+        import httpx
+
+        headers = {"Authorization": f"Bearer {config.community.bot_token}"}
+        try:
+            # Public probe: tells us the endpoint answers, nothing about auth.
             resp = httpx.post(
                 config.community.api_url,
                 json={"query": "{ __typename }"},
-                headers={"Authorization": f"Bearer {config.community.bot_token}"},
+                headers=headers,
                 timeout=10,
             )
             check(f"api reachable ({resp.status_code})", resp.status_code == 200, config.community.api_url)
+
+            # Authoritative probe: a rejected token fails here, and the
+            # identity must be the one every module acts as.
+            resp = httpx.post(
+                config.community.api_url,
+                json={"query": "{ me { id name } }"},
+                headers=headers,
+                timeout=10,
+            )
+            body = resp.json() if resp.status_code == 200 else {}
+            me = (body.get("data") or {}).get("me") or {}
+            check(
+                f"token accepted by api ({resp.status_code})",
+                bool(me.get("id")),
+                "token was rejected — re-mint it in tribe-auth",
+            )
+            check(
+                f"identity is {me.get('name') or 'unknown'} ({me.get('id')})",
+                bool(me.get("id")) and me.get("id") == config.community.user_id,
+                "me.id does not match community.user_id — modules would act as the wrong user",
+            )
         except Exception as exc:  # noqa: BLE001
             check("api reachable", False, str(exc))
 

@@ -150,21 +150,16 @@ def make_app(config: AppConfig):
             header = jwt.get_unverified_header(token)
         except jwt.PyJWTError:
             return None
-        alg = header.get("alg", "")
-        if alg == "RS256":
-            # tokens issued by the tribe-auth service; aud checked by us
-            if jwks_provider is None:
-                return None
-            key = await jwks_provider.get_signing_key(header.get("kid"))
-            if key is None:
-                return None
-        elif alg == community.jwt_algorithm and community.jwt_secret:
-            key = community.jwt_secret
-        else:
+        if header.get("alg") != "RS256":
+            return None
+        if jwks_provider is None:
+            return None
+        key = await jwks_provider.get_signing_key(header.get("kid"))
+        if key is None:
             return None
         try:
             payload = jwt.decode(
-                token, key, algorithms=[alg], options={"verify_aud": False}
+                token, key, algorithms=["RS256"], options={"verify_aud": False}
             )
         except jwt.PyJWTError:
             return None

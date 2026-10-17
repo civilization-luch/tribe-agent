@@ -1,5 +1,8 @@
-"""Tests for the assistant module's token verification (HS256 fallback +
-RS256 via the tribe-auth JWKS) and the JWKS client itself.
+"""Tests for the assistant module's token verification (RS256 via the
+tribe-auth JWKS) and the JWKS client itself.
+
+Authentication is RS256-only: the legacy HS256 shared-secret path was
+removed together with the engine's (tribe-engine stage 6).
 
 The ``assistant`` extra (fastapi/pyjwt) is optional — tests skip without it.
 """
@@ -121,13 +124,6 @@ async def test_jwks_single_key_without_kid() -> None:
 # ── assistant module auth ──────────────────────────────────────────────
 
 
-def _issue_hs256(secret: str, **claims: Any) -> str:
-    payload = {"sub": "u1", "type": "access",
-               "exp": datetime.now(UTC) + timedelta(minutes=5)}
-    payload.update(claims)
-    return jwt.encode(payload, secret, algorithm="HS256")
-
-
 def _issue_rs256(private_pem: str, kid: str = "k1", **claims: Any) -> str:
     payload = {"sub": "u1", "type": "access",
                "exp": datetime.now(UTC) + timedelta(minutes=5)}
@@ -164,16 +160,19 @@ def _auth(app, token: str) -> httpx.Response:
         )
 
 
-# HS256 legacy path (TRIBE_AGENT_JWT_SECRET) — must keep working
-def test_hs256_legacy_token_accepted(assistant_app) -> None:
-    app = assistant_app(CommunityConfig(jwt_secret="legacy-secret-at-least-32-bytes!!"))
-    resp = _auth(app, _issue_hs256("legacy-secret-at-least-32-bytes!!"))
-    assert resp.status_code == 502  # auth passed; opencode backend unreachable
-
-
-def test_hs256_wrong_secret_rejected(assistant_app) -> None:
-    app = assistant_app(CommunityConfig(jwt_secret="legacy-secret-at-least-32-bytes!!"))
-    resp = _auth(app, _issue_hs256("some-other-secret-32-bytes-long!!!"))
+# HS256 is not supported anymore (tribe-engine stage 6 removed the shared
+# secret) — such tokens must be rejected outright.
+def test_hs256_token_rejected(assistant_app) -> None:
+    _, public_jwk = _rsa_keypair()
+    app = assistant_app(
+        CommunityConfig(auth_url="http://auth.test"),
+        jwks={"keys": [json.loads(public_jwk)]},
+    )
+    resp = _auth(app, jwt.encode(
+        {"sub": "u1", "type": "access",
+         "exp": datetime.now(UTC) + timedelta(minutes=5)},
+        "legacy-secret-at-least-32-bytes!!", algorithm="HS256",
+    ))
     assert resp.status_code == 401
 
 
@@ -223,24 +222,30 @@ def test_rs256_unreachable_jwks_rejected(assistant_app) -> None:
 
 
 def test_rs256_token_without_jwks_config_rejected(assistant_app) -> None:
-    """HS256-only config must not accept RS256 tokens."""
+    """No auth service configured → RS256 tokens have no key to verify against."""
     private_pem, _ = _rsa_keypair()
-    app = assistant_app(CommunityConfig(jwt_secret="legacy-secret-at-least-32-bytes!!"))
+    app = assistant_app(CommunityConfig())
     resp = _auth(app, _issue_rs256(private_pem))
     assert resp.status_code == 401
 
 
 # common auth rules
 def test_refresh_token_type_rejected(assistant_app) -> None:
-    secret = "legacy-secret-at-least-32-bytes!!"
-    app = assistant_app(CommunityConfig(jwt_secret=secret))
-    resp = _auth(app, _issue_hs256(secret, type="refresh"))
+    private_pem, public_jwk = _rsa_keypair()
+    app = assistant_app(
+        CommunityConfig(auth_url="http://auth.test"),
+        jwks={"keys": [json.loads(public_jwk)]},
+    )
+    resp = _auth(app, _issue_rs256(private_pem, type="refresh"))
     assert resp.status_code == 401
 
 
 def test_missing_and_garbage_tokens_rejected(assistant_app) -> None:
-    secret = "legacy-secret-at-least-32-bytes!!"
-    app = assistant_app(CommunityConfig(jwt_secret=secret))
+    _, public_jwk = _rsa_keypair()
+    app = assistant_app(
+        CommunityConfig(auth_url="http://auth.test"),
+        jwks={"keys": [json.loads(public_jwk)]},
+    )
     from fastapi.testclient import TestClient
 
     with TestClient(app) as client:
