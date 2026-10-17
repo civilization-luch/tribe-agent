@@ -121,13 +121,20 @@ def _db_with_session(table: str) -> Path:
     conn = sqlite3.connect(db)
     conn.execute("CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT NOT NULL)")
     conn.execute(
-        f"CREATE TABLE {table} (id TEXT PRIMARY KEY, project_id TEXT, time_created INTEGER)"
+        f"CREATE TABLE {table} "
+        "(id TEXT PRIMARY KEY, project_id TEXT, title TEXT, time_created INTEGER)"
     )
     conn.execute("INSERT INTO project VALUES ('p1', '/repo')")
-    conn.execute(f"INSERT INTO {table} VALUES ('ses_new', 'p1', 100)")
+    conn.execute(f"INSERT INTO {table} VALUES ('ses_new', 'p1', 'classify-1', 100)")
+    conn.execute(f"INSERT INTO {table} VALUES ('ses_old', 'p1', 'classify-0', 50)")
     conn.commit()
     conn.close()
     return db
+
+
+def test_session_lookup_matches_the_run_title() -> None:
+    db = _db_with_session("session_v2")
+    assert _last_session_id(db, Path("/repo"), "classify-0") == "ses_old"
 
 
 def test_session_lookup_prefers_session_v2() -> None:

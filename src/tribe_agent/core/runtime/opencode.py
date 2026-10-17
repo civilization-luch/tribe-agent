@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
+import time
 from pathlib import Path
 
 from tribe_agent.core.config import AppConfig
@@ -46,13 +47,42 @@ def _classify(exit_code: int, stderr: str) -> str:
     return "ok" if exit_code == 0 else "error"
 
 
-def _last_session_id(db_path: Path, directory: Path) -> str | None:
-    """Newest session for a project worktree.
+SESSION_LOOKUP_RETRIES = 5
+SESSION_LOOKUP_DELAY = 0.4
 
-    opencode v2 stores sessions in ``session_v2``; older databases keep them
-    in ``session``, so both are consulted.
+
+def _query(db_path: Path, queries: tuple[str, ...], value: str) -> str | None:
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.Error as exc:
+        logger.warning("session lookup failed for %s: %s", db_path, exc)
+        return None
+    found: str | None = None
+    for query in queries:
+        try:
+            row = conn.execute(query, (value,)).fetchone()
+        except sqlite3.Error:
+            continue
+        if row:
+            found = row[0]
+            break
+    conn.close()
+    return found
+
+
+def _last_session_id(db_path: Path, directory: Path, title: str = "") -> str | None:
+    """Newest session created by a run.
+
+    opencode v2 stores sessions in ``session_v2``; older databases keep them in
+    ``session``, so both are consulted. A session is committed shortly after the
+    run returns, so the lookup is retried — the run title identifies the session
+    exactly, and the project worktree is the fallback.
     """
-    queries = (
+    by_title = (
+        "SELECT id FROM session_v2 WHERE title = ? ORDER BY time_created DESC LIMIT 1",
+        "SELECT id FROM session WHERE title = ? ORDER BY time_created DESC LIMIT 1",
+    )
+    by_worktree = (
         (
             "SELECT s.id FROM session_v2 s JOIN project p ON s.project_id = p.id "
             "WHERE p.worktree = ? ORDER BY s.time_created DESC LIMIT 1"
@@ -62,19 +92,14 @@ def _last_session_id(db_path: Path, directory: Path) -> str | None:
             "WHERE p.worktree = ? ORDER BY s.time_created DESC LIMIT 1"
         ),
     )
-    try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        for query in queries:
-            try:
-                row = conn.execute(query, (str(directory),)).fetchone()
-            except sqlite3.Error:
-                continue
-            if row:
-                conn.close()
-                return row[0]
-        conn.close()
-    except Exception as exc:  # noqa: BLE001 — a missing db must not fail the run
-        logger.warning("session lookup failed for %s: %s", db_path, exc)
+    attempts = SESSION_LOOKUP_RETRIES if title else 1
+    for attempt in range(attempts):
+        found = _query(db_path, by_title, title) if title else None
+        found = found or _query(db_path, by_worktree, str(directory))
+        if found:
+            return found
+        if attempt + 1 < attempts:
+            time.sleep(SESSION_LOOKUP_DELAY)
     return None
 
 
@@ -111,7 +136,9 @@ class OpencodeRuntime(CodingRuntime):
         cmd.append(prompt)
 
         exit_code, stdout, stderr = await _run(cmd, directory, self._env(), self.timeout)
-        session_id = await asyncio.to_thread(_last_session_id, self.sidecar.db_path, directory)
+        session_id = await asyncio.to_thread(
+            _last_session_id, self.sidecar.db_path, directory, title
+        )
         return RunResult(
             exit_code=exit_code,
             stdout=stdout,
