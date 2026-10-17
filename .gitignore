@@ -19,3 +19,4 @@ config.yaml
 docker/config.yaml
 config.platform.yaml
 data_platform/
+.playwright-mcp/
