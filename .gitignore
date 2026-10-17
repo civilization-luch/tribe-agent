@@ -15,6 +15,7 @@ data/
 /repos/
 .DS_Store
 *.log
+logs/
 config.yaml
 docker/config.yaml
 config.platform.yaml

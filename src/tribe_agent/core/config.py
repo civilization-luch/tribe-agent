@@ -62,6 +62,7 @@ class OpencodeConfig(BaseModel):
     url: str = ""
     password: str = ""
     model: str = ""
+    port: int = 0
     providers: dict[str, Any] = Field(default_factory=dict)
 
 

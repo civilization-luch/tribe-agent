@@ -28,3 +28,6 @@ class CodingRuntime(ABC):
         self, *, title: str, prompt: str, directory: Path, agent: str
     ) -> RunResult:
         raise NotImplementedError
+
+    async def close(self) -> None:
+        """Release anything the runtime kept alive across runs."""

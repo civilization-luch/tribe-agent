@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import logging
 import shutil
-import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -42,9 +41,7 @@ concurrency:
   max_queue: 200
 
 opencode:
-  config_dir: ""
-  db: ""
-  url: ""
+  port: 47391
   password: ""
   model: ""
   providers: {}
@@ -135,11 +132,33 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     check("user_id set", bool(config.community.user_id), "set community.user_id")
     check("mcp_url set", bool(config.community.mcp_url), "set community.mcp_url")
     check("opencode on PATH", shutil.which("opencode") is not None, "install opencode")
-    check(
-        "opencode config dir",
-        Path(config.opencode.config_dir).is_dir(),
-        config.opencode.config_dir,
+
+    from tribe_agent.core.opencode_config import (
+        agents_path,
+        ensure_config_home,
+        missing_agents,
     )
+    from tribe_agent.core.sidecar import OK, OpencodeSidecar
+
+    ensure_config_home(config)
+    absent = missing_agents(config)
+    check(
+        "opencode agents in sidecar home",
+        not absent and agents_path(config).is_dir(),
+        "missing: " + ", ".join(absent) if absent else str(agents_path(config)),
+    )
+    if shutil.which("opencode"):
+        sidecar = OpencodeSidecar(config)
+        try:
+            status = asyncio.run(sidecar.probe())
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger("tribe_agent").debug("sidecar probe failed: %s", exc)
+            status = "error"
+        check(
+            f"opencode sidecar on {sidecar.url} ({status})",
+            status == OK,
+            "not running; `tribe-agent run` starts it",
+        )
     check(
         "project or repo binding",
         bool(config.project_path)
@@ -222,23 +241,31 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def cmd_sessions(args: argparse.Namespace) -> int:
-    from tribe_agent.core.opencode_config import default_db_path
+    import sqlite3
+
+    from tribe_agent.core.opencode_config import sidecar_db_path
 
     config = _resolve_config(args)
-    db = Path(config.opencode.db) if config.opencode.db else default_db_path()
+    db = sidecar_db_path(config)
     if not db.is_file():
         print(f"no opencode database found at {db}")
         return 0
-    result = subprocess.run(
-        ["sqlite3", str(db), "SELECT id, title, time_created FROM session ORDER BY time_created DESC LIMIT 20;"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        print(result.stderr.strip() or "failed to read sessions")
-        return 1
-    print(result.stdout.strip() or "(no sessions)")
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    rows: list[tuple] = []
+    for table in ("session_v2", "session"):
+        try:
+            rows = conn.execute(
+                f"SELECT id, title, time_created FROM {table} ORDER BY time_created DESC LIMIT 20"
+            ).fetchall()
+        except sqlite3.Error:
+            continue
+        if rows:
+            break
+    conn.close()
+    for session_id, title, created in rows:
+        print(f"{created}  {session_id}  {title}")
+    if not rows:
+        print("(no sessions)")
     return 0
 
 

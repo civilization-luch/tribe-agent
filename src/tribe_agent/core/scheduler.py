@@ -72,8 +72,6 @@ class Runner:
 
     def _prepare_dirs(self) -> None:
         self.config.data_path.mkdir(parents=True, exist_ok=True)
-        if self.config.opencode.db:
-            Path(self.config.opencode.db).expanduser().parent.mkdir(parents=True, exist_ok=True)
 
     def _collect(self) -> tuple[dict[str, TaskSpec], list[Scanner]]:
         specs: dict[str, TaskSpec] = {}
@@ -116,6 +114,7 @@ class Runner:
         try:
             await asyncio.gather(*coros)
         finally:
+            await runtime.close()
             await client.close()
             await queue.close()
 
