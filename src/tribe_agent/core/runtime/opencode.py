@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import sqlite3
 from pathlib import Path
@@ -10,6 +11,8 @@ from pathlib import Path
 from tribe_agent.core.config import AppConfig
 from tribe_agent.core.opencode_config import default_db_path, ensure_runtime_config
 from tribe_agent.core.runtime.base import CodingRuntime, RunResult
+
+logger = logging.getLogger("tribe_agent")
 
 DEFAULT_TIMEOUT = 600
 
@@ -43,21 +46,35 @@ def _classify(exit_code: int, stderr: str) -> str:
 
 
 def _last_session_id(db_path: Path, directory: Path) -> str | None:
+    """Newest session for a project worktree.
+
+    opencode v2 stores sessions in ``session_v2``; older databases keep them
+    in ``session``, so both are consulted.
+    """
+    queries = (
+        (
+            "SELECT s.id FROM session_v2 s JOIN project p ON s.project_id = p.id "
+            "WHERE p.worktree = ? ORDER BY s.time_created DESC LIMIT 1"
+        ),
+        (
+            "SELECT s.id FROM session s JOIN project p ON s.project_id = p.id "
+            "WHERE p.worktree = ? ORDER BY s.time_created DESC LIMIT 1"
+        ),
+    )
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        row = conn.execute(
-            """
-            SELECT s.id FROM session s
-            JOIN project p ON s.project_id = p.id
-            WHERE p.worktree = ?
-            ORDER BY s.time_created DESC LIMIT 1
-            """,
-            (str(directory),),
-        ).fetchone()
+        for query in queries:
+            try:
+                row = conn.execute(query, (str(directory),)).fetchone()
+            except sqlite3.Error:
+                continue
+            if row:
+                conn.close()
+                return row[0]
         conn.close()
-        return row[0] if row else None
-    except Exception:  # noqa: BLE001
-        return None
+    except Exception as exc:  # noqa: BLE001 — a missing db must not fail the run
+        logger.warning("session lookup failed for %s: %s", db_path, exc)
+    return None
 
 
 class OpencodeRuntime(CodingRuntime):
@@ -89,12 +106,12 @@ class OpencodeRuntime(CodingRuntime):
             "opencode",
             "run",
             "--auto",
-            "--dir",
-            str(directory),
             "--title",
             title,
+            # opencode v2 takes lowercase levels and resolves the project from
+            # the working directory (the old `--dir` flag is gone).
             "--log-level",
-            "INFO",
+            "info",
         ]
         if agent:
             cmd += ["--agent", agent]
