@@ -87,3 +87,100 @@ async def test_list_tasks_includes_failed(queue: TaskQueue):
     assert [t.payload["issue_id"] for t in completed] == ["ok"]
     both = await queue.list_tasks("execute", ("completed", "failed"))
     assert sorted(t.payload["issue_id"] for t in both) == ["bad", "ok"]
+
+
+LEGACY_SCHEMA = """
+CREATE TABLE tasks (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_type    TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'pending',
+    community_id TEXT NOT NULL DEFAULT '',
+    workspace_id TEXT NOT NULL DEFAULT '',
+    repo_path    TEXT NOT NULL DEFAULT '',
+    dedup_key    TEXT NOT NULL DEFAULT '',
+    payload      TEXT NOT NULL DEFAULT '{}',
+    created_at   TEXT NOT NULL,
+    started_at   TEXT,
+    completed_at TEXT,
+    result       TEXT,
+    error        TEXT
+);
+CREATE UNIQUE INDEX idx_tasks_dedup ON tasks (task_type, dedup_key) WHERE dedup_key <> '';
+"""
+
+
+async def test_failed_task_is_retried_until_attempts_run_out(queue: TaskQueue):
+    task_id = await queue.enqueue("execute", {"issue_id": "i1"}, dedup_key="i1")
+    for attempt in (1, 2, queue.max_attempts):
+        batch = await queue.dequeue_batch("execute", 1)
+        assert len(batch) == 1
+        await queue.fail(batch[0].id, "boom")
+        failed = await queue.list_tasks("execute", ("failed",))
+        assert failed[0].attempts == attempt
+
+        again = await queue.enqueue("execute", {"issue_id": "i1"}, dedup_key="i1")
+        if attempt < queue.max_attempts:
+            assert again == task_id
+            assert await queue.count_pending("execute") == 1
+        else:
+            assert again is None
+            assert await queue.count_pending("execute") == 0
+
+
+async def test_requeue_refreshes_payload_and_clears_previous_error(queue: TaskQueue):
+    task_id = await queue.enqueue(
+        "execute", {"issue_id": "i1", "title": "old"}, dedup_key="i1", repo_path="/tmp/old"
+    )
+    batch = await queue.dequeue_batch("execute", 1)
+    await queue.fail(batch[0].id, "boom")
+
+    again = await queue.enqueue(
+        "execute", {"issue_id": "i1", "title": "new"}, dedup_key="i1", repo_path="/tmp/new"
+    )
+    assert again == task_id
+    retried = await queue.dequeue_batch("execute", 1)
+    assert retried[0].payload == {"issue_id": "i1", "title": "new"}
+    assert retried[0].repo_path == "/tmp/new"
+    assert retried[0].attempts == 1
+
+
+async def test_pending_and_completed_tasks_still_block_duplicates(queue: TaskQueue):
+    task_id = await queue.enqueue("execute", {}, dedup_key="i1")
+    assert await queue.enqueue("execute", {}, dedup_key="i1") is None
+    batch = await queue.dequeue_batch("execute", 1)
+    await queue.complete(batch[0].id, {})
+    assert await queue.enqueue("execute", {}, dedup_key="i1") is None
+    assert task_id is not None
+
+
+async def test_stale_reset_counts_as_an_attempt(queue: TaskQueue):
+    await queue.enqueue("classify", {}, dedup_key="c1")
+    await queue.dequeue_batch("classify", 1)
+    await queue.reset_stale(timeout_minutes=0)
+    batch = await queue.dequeue_batch("classify", 1)
+    assert batch[0].attempts == 1
+
+
+async def test_connect_adds_attempts_to_a_legacy_database(tmp_path: Path):
+    import sqlite3
+
+    db = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(LEGACY_SCHEMA)
+    conn.execute(
+        "INSERT INTO tasks (task_type, status, dedup_key, payload, created_at)"
+        " VALUES ('execute', 'failed', 'i1', '{}', '2026-01-01T00:00:00+00:00')"
+    )
+    conn.commit()
+    conn.close()
+
+    q = TaskQueue(db, max_attempts=2)
+    await q.connect()
+    try:
+        failed = await q.list_tasks("execute", ("failed",))
+        assert len(failed) == 1
+        assert failed[0].attempts == 0
+        assert await q.enqueue("execute", {"issue_id": "i1"}, dedup_key="i1") == failed[0].id
+        assert await q.count_pending("execute") == 1
+    finally:
+        await q.close()

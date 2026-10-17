@@ -95,7 +95,10 @@ class Runner:
     async def run(self) -> None:
         self._prepare_dirs()
         client = GraphQLClient(self.config.community.api_url, self.config.community.bot_token)
-        queue = TaskQueue(self.config.data_path / "agent.db")
+        queue = TaskQueue(
+            self.config.data_path / "agent.db",
+            max_attempts=self.config.concurrency.max_attempts,
+        )
         await queue.connect()
         ctx = self._make_context(client, queue)
         specs, scanners = self._collect()
@@ -121,7 +124,10 @@ class Runner:
     async def scan_once(self, name: str) -> None:
         self._prepare_dirs()
         client = GraphQLClient(self.config.community.api_url, self.config.community.bot_token)
-        queue = TaskQueue(self.config.data_path / "agent.db")
+        queue = TaskQueue(
+            self.config.data_path / "agent.db",
+            max_attempts=self.config.concurrency.max_attempts,
+        )
         await queue.connect()
         ctx = self._make_context(client, queue)
         _, scanners = self._collect()
@@ -137,7 +143,10 @@ class Runner:
     async def run_queue_once(self) -> None:
         self._prepare_dirs()
         client = GraphQLClient(self.config.community.api_url, self.config.community.bot_token)
-        queue = TaskQueue(self.config.data_path / "agent.db")
+        queue = TaskQueue(
+            self.config.data_path / "agent.db",
+            max_attempts=self.config.concurrency.max_attempts,
+        )
         await queue.connect()
         ctx = self._make_context(client, queue)
         specs, _ = self._collect()

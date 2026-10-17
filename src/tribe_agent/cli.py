@@ -39,6 +39,7 @@ repo:
 concurrency:
   max_runs: 2
   max_queue: 200
+  max_attempts: 3
 
 opencode:
   port: 47391

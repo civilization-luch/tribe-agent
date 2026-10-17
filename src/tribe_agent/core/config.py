@@ -54,6 +54,7 @@ class RepoConfig(BaseModel):
 class ConcurrencyConfig(BaseModel):
     max_runs: int = 2
     max_queue: int = 200
+    max_attempts: int = 3
 
 
 class OpencodeConfig(BaseModel):
