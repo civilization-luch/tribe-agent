@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from tribe_agent.core.config import AppConfig
@@ -18,9 +19,22 @@ LIST_SUPPORT_REQUESTS = """
 query($communityId: String!, $status: String!, $limit: Int!) {
   supportRequests(communityId: $communityId, status: $status, limit: $limit) {
     id communityId sourceId targetGroupId title body status labels createdAt
+    claimedBy claimExpiresAt
   }
 }
 """
+
+
+def _has_active_claim(request: dict[str, Any]) -> bool:
+    if not request.get("claimedBy") or not request.get("claimExpiresAt"):
+        return False
+    try:
+        expires = datetime.fromisoformat(str(request["claimExpiresAt"]))
+    except (TypeError, ValueError):
+        return False
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=UTC)
+    return expires > datetime.now(UTC)
 
 
 class SupportModule(Module):
@@ -79,6 +93,8 @@ class SupportModule(Module):
             for request in requests:
                 request_id = request.get("id", "")
                 if not request_id:
+                    continue
+                if _has_active_claim(request):
                     continue
                 task_id = await ctx.queue.enqueue(
                     "support",
@@ -159,7 +175,9 @@ class SupportModule(Module):
             "",
             "Rules:",
             "- Read each request with `get_support_request` before acting.",
+            "- If the request is no longer `new`, or is claimed by another actor, stop and report it; do not change anything.",
             "- Claim it with `claim_support_request` and the given claim_ttl_seconds.",
+            "- If the claim fails because another actor holds it, stop; do not retry or take over.",
             "- Public replies go to the author. Internal notes are for the team only.",
             "- Never expose internal notes, source tokens, or private issue details.",
             "- Use `needs_info` only with a concrete question.",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from tribe_agent.core.config import load_config
@@ -236,6 +237,20 @@ async def test_support_scanner_enqueues_enabled_request():
     assert payload["workspace_id"] == "w1"
     assert payload["claim_ttl_seconds"] == 600
     assert kwargs["dedup_key"] == "r1"
+
+
+async def test_support_scanner_skips_active_claim():
+    module = SupportModule()
+    config = load_config(profile="community")
+    config.module_settings["support"] = {"communities": ["platform"], "agent_enabled": True}
+    request = _support_request()
+    request["claimedBy"] = "human-1"
+    request["claimExpiresAt"] = (datetime.now(UTC) + timedelta(minutes=15)).isoformat()
+    client = StubSupportClient(requests=[request])
+    queue = StubScalarQueue()
+
+    assert await module._scan(_scan_ctx(client, queue, config)) == 0
+    assert queue.enqueued == []
 
 
 def test_support_prompt_contains_claim_and_dry_run():
