@@ -45,6 +45,37 @@ async def test_complete_and_fail(queue: TaskQueue):
     assert task_id is not None
 
 
+async def test_support_task_survives_restart_and_retry(queue: TaskQueue):
+    task_id = await queue.enqueue(
+        "support",
+        {"support_request_id": "r1", "community_id": "platform"},
+        community_id="platform",
+        dedup_key="r1",
+    )
+    batch = await queue.dequeue_batch("support", 1)
+    await queue.fail(batch[0].id, "agent unavailable")
+
+    retried = await queue.enqueue(
+        "support",
+        {"support_request_id": "r1", "community_id": "platform"},
+        community_id="platform",
+        dedup_key="r1",
+    )
+    assert retried == task_id
+    assert await queue.count_pending("support") == 1
+
+    await queue.close()
+    reopened = TaskQueue(queue.path)
+    await reopened.connect()
+    try:
+        assert await reopened.count_pending("support") == 1
+        batch = await reopened.dequeue_batch("support", 1)
+        await reopened.complete(batch[0].id, {"ok": True})
+        assert await reopened.count_pending("support") == 0
+    finally:
+        await reopened.close()
+
+
 async def test_reset_stale(queue: TaskQueue):
     await queue.enqueue("classify", {}, dedup_key="c1")
     await queue.dequeue_batch("classify", 1)
