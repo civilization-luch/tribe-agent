@@ -51,11 +51,13 @@ telegram:
 intervals:
   notifications: 60
   announcements: 3600
+  support: 120
   run_agent: 60
 
 batch_limits:
   notification: 30
   announcement: 10
+  support: 10
 
 # Per-module settings (see profiles/*.yaml for the enabled set).
 module_settings:
@@ -78,3 +80,13 @@ module_settings:
   assistant:
     rate_limit: 30
     timeout: 180
+  support:
+    communities: []        # empty: community.communities
+    status: new
+    scan_limit: 50
+    # Community setting support.agent_enabled wins over this local switch.
+    agent_enabled: false
+    auto_convert: false    # create an issue for accepted requests
+    workspace_id: ""       # default conversion workspace
+    dry_run: false         # analyze only, never mutate
+    claim_ttl_seconds: 900

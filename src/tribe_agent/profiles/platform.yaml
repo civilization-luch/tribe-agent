@@ -6,13 +6,16 @@ modules:
   - executor
   - self_heal
   - assistant
+  - support
 intervals:
   notifications: 60
   announcements: 3600
   classify: 300
+  support: 120
   run_agent: 60
 batch_limits:
   notification: 30
   announcement: 10
   classify: 30
+  support: 10
   execute: 5

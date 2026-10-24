@@ -8,7 +8,13 @@ from tribe_agent.core.config import load_config, load_profile
 def test_community_profile_defaults():
     config = load_config()
     assert config.profile == "community"
-    assert config.enabled_modules == ["notifications", "announcements", "executor", "self_heal"]
+    assert config.enabled_modules == [
+        "notifications",
+        "announcements",
+        "executor",
+        "self_heal",
+        "support",
+    ]
     assert config.opencode.config_dir.endswith("tribe_agent/opencode")
 
 

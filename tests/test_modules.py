@@ -12,6 +12,7 @@ from tribe_agent.modules.classify import ClassifyModule
 from tribe_agent.modules.executor import ExecutorModule
 from tribe_agent.modules.notifications import NotificationsModule
 from tribe_agent.modules.self_heal import SelfHealModule
+from tribe_agent.modules.support import SupportModule
 
 _PKG = Path(__file__).resolve().parents[1] / "src" / "tribe_agent"
 
@@ -32,7 +33,7 @@ def test_community_modules_register_scanners_and_tasks():
     config = load_config(profile="community")
     modules = load_modules(config)
     ids = [m.id for m in modules]
-    assert ids == ["notifications", "announcements", "executor", "self_heal"]
+    assert ids == ["notifications", "announcements", "executor", "self_heal", "support"]
     for module in modules:
         assert module.scanners(config)
         assert module.tasks(config)
@@ -49,6 +50,7 @@ def test_agent_names_are_namespaced():
     assert agents["classify"] == "tribe-classifier"
     assert agents["execute"] == "tribe-task-executor"
     assert agents["self_heal"] == "tribe-self-healer"
+    assert agents["support"] == "tribe-support"
 
 
 def test_notifications_prompt_contains_events():
@@ -114,8 +116,8 @@ class StubScalarQueue:
         return len(self.enqueued)
 
 
-def _scan_ctx(client, queue) -> ScanContext:
-    config = load_config(profile="community")
+def _scan_ctx(client, queue, config=None) -> ScanContext:
+    config = config or load_config(profile="community")
     config.community.communities = ["platform"]
     return ScanContext(
         config=config,
@@ -159,6 +161,115 @@ async def test_self_heal_skips_below_threshold():
     queue = StubScalarQueue()
     assert await module._scan(_scan_ctx(client, queue)) == 0
     assert queue.enqueued == []
+
+
+class StubSupportClient:
+    def __init__(self, settings: dict | None = None, requests: list[dict] | None = None) -> None:
+        self._settings = settings or {}
+        self._requests = requests or []
+
+    async def gql(self, query: str, variables: dict | None = None) -> dict:
+        if "community(" in query:
+            return {"community": {"id": "c1", "settings": self._settings}}
+        if "supportRequests" in query:
+            return {"supportRequests": self._requests}
+        return {}
+
+
+def _support_request() -> dict:
+    return {
+        "id": "r1",
+        "communityId": "c1",
+        "sourceId": "s1",
+        "targetGroupId": "g1",
+        "title": "Broken button",
+        "body": "The button does not work",
+        "status": "new",
+        "labels": ["kind:problem"],
+        "createdAt": "2026-10-24T10:00:00Z",
+    }
+
+
+async def test_support_scanner_skips_when_agent_disabled():
+    module = SupportModule()
+    config = load_config(profile="community")
+    config.module_settings["support"] = {"communities": ["platform"]}
+    client = StubSupportClient(requests=[_support_request()])
+    queue = StubScalarQueue()
+    assert await module._scan(_scan_ctx(client, queue, config)) == 0
+    assert queue.enqueued == []
+
+
+async def test_support_scanner_honors_community_settings():
+    module = SupportModule()
+    config = load_config(profile="community")
+    config.module_settings["support"] = {"communities": ["platform"], "agent_enabled": True}
+    client = StubSupportClient(
+        settings={"support.agent_enabled": False},
+        requests=[_support_request()],
+    )
+    queue = StubScalarQueue()
+    assert await module._scan(_scan_ctx(client, queue, config)) == 0
+    assert queue.enqueued == []
+
+
+async def test_support_scanner_enqueues_enabled_request():
+    module = SupportModule()
+    config = load_config(profile="community")
+    config.module_settings["support"] = {
+        "communities": ["platform"],
+        "agent_enabled": True,
+        "auto_convert": True,
+        "workspace_id": "w1",
+    }
+    client = StubSupportClient(
+        settings={"support.agent_claim_ttl_seconds": 600},
+        requests=[_support_request()],
+    )
+    queue = StubScalarQueue()
+    assert await module._scan(_scan_ctx(client, queue, config)) == 1
+    task_type, payload, kwargs = queue.enqueued[0]
+    assert task_type == "support"
+    assert payload["support_request_id"] == "r1"
+    assert payload["community_id"] == "c1"
+    assert payload["auto_convert"] is True
+    assert payload["workspace_id"] == "w1"
+    assert payload["claim_ttl_seconds"] == 600
+    assert kwargs["dedup_key"] == "r1"
+
+
+def test_support_prompt_contains_claim_and_dry_run():
+    module = SupportModule()
+    spec = module.tasks(load_config(profile="platform"))["support"]
+    prompt = spec.build_prompt(
+        [
+            _task(
+                "support",
+                {
+                    "support_request_id": "r1",
+                    "community_id": "c1",
+                    "title": "Broken",
+                    "body": "It fails",
+                    "labels": ["kind:problem"],
+                    "dry_run": True,
+                    "auto_convert": False,
+                    "claim_ttl_seconds": 900,
+                },
+            )
+        ]
+    )
+    assert "@tribe-support" in prompt
+    assert "claim_support_request" in prompt
+    assert "support_request_id=r1" in prompt
+    assert "DRY RUN" in prompt
+
+
+def test_support_agent_and_skill_are_packaged():
+    agent = _read_packaged("opencode/agents/tribe-support.md")
+    skill = _read_packaged("opencode/skills/tribe-support-triage/SKILL.md")
+    assert "claim_support_request" in agent
+    assert "DRY RUN" in agent
+    assert "release_support_request_claim" in skill
 
 
 def _read_packaged(rel: str) -> str:

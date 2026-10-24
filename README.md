@@ -2,8 +2,9 @@
 
 Self-hosted community agent for Tribe. One codebase, configured by profiles:
 
-- `community` — a user's agent: notifications, announcements, issue execution.
-- `platform` — the platform organizer: adds `classify` (feedback triage) and `assistant`.
+- `community` — a user's agent: notifications, announcements, issue execution, support triage.
+- `platform` — the platform organizer: adds `classify` (feedback triage), `assistant`, and
+  `support` (SupportRequest triage).
 
 The agent talks to a Tribe community over GraphQL and hands coding work to a
 runtime (opencode now, codex later) inside the user's project repository.

@@ -4,11 +4,14 @@ modules:
   - announcements
   - executor
   - self_heal
+  - support
 intervals:
   notifications: 60
   announcements: 3600
+  support: 120
   run_agent: 60
 batch_limits:
   notification: 30
   announcement: 10
+  support: 10
   execute: 5

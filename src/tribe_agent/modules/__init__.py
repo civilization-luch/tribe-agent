@@ -13,6 +13,7 @@ from tribe_agent.modules.deployer import DeployerModule
 from tribe_agent.modules.executor import ExecutorModule
 from tribe_agent.modules.notifications import NotificationsModule
 from tribe_agent.modules.self_heal import SelfHealModule
+from tribe_agent.modules.support import SupportModule
 
 logger = logging.getLogger("tribe_agent")
 
@@ -24,6 +25,7 @@ ALL_MODULES: list[type[Module]] = [
     SelfHealModule,
     DeployerModule,
     AssistantModule,
+    SupportModule,
 ]
 
 
